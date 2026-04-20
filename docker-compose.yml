@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: metron-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: metron
+      POSTGRES_PASSWORD: metron
+      POSTGRES_DB: metron
+    ports:
+      - "5434:5432"
+    volumes:
+      - metron_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metron -d metron"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: metron-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - metron_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: metron-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      DATABASE_URL: postgresql://metron:metron@postgres:5432/metron?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: dev-access-secret-change-me
+      JWT_REFRESH_SECRET: dev-refresh-secret-change-me
+      COOKIE_SECRET: dev-cookie-secret-change-me
+      CORS_ORIGIN: http://localhost:5173
+      RATE_FETCH_INTERVAL_MS: 900000
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/prisma:/app/prisma
+
+volumes:
+  metron_pg:
+  metron_redis:

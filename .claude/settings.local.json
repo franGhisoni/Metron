@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker compose *)",
+      "Bash(docker exec *)",
+      "Bash(powershell -Command \"Test-NetConnection -ComputerName localhost -Port 5433\")",
+      "Bash(node -e \"require\\('dotenv'\\).config\\(\\); console.log\\('URL:', process.env.DATABASE_URL\\)\")",
+      "Bash(powershell -Command \"netstat -ano | findstr ':5433'\")",
+      "Bash(powershell -Command \"Get-Process -Id 9176,31332 | Select-Object Id,ProcessName,Path\")",
+      "Bash(powershell -Command \"netstat -ano | findstr 'LISTENING' | findstr ':54'\")"
+    ]
+  }
+}

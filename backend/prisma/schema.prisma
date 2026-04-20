@@ -1,0 +1,189 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AccountType {
+  checking
+  savings
+  cash
+  credit_card
+  investment
+  crypto_wallet
+  other
+}
+
+enum TxType {
+  income
+  expense
+  transfer
+}
+
+enum TxStatus {
+  paid
+  pending
+  scheduled
+}
+
+model User {
+  id                      String   @id @default(cuid())
+  email                   String   @unique
+  passwordHash            String
+  phone                   String?
+  currencyPref            String   @default("ARS")
+  fiftyThirtyTwenty       Boolean  @default(false)
+  liquidityAlertThreshold Decimal?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  accounts         Account[]
+  transactions     Transaction[]
+  categories       Category[]
+  investments      Investment[]
+  goals            SavingsGoal[]
+  monthlySummaries MonthlySummary[]
+  refreshTokens    RefreshToken[]
+}
+
+model RefreshToken {
+  id         String   @id @default(cuid())
+  userId     String
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Account {
+  id                  String      @id @default(cuid())
+  userId              String
+  name                String
+  type                AccountType
+  currency            String
+  balance             Decimal     @default(0)
+  closingDay          Int?
+  dueDaysAfterClosing Int?
+  creditLimit         Decimal?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@index([userId])
+}
+
+model Transaction {
+  id                 String   @id @default(cuid())
+  userId             String
+  accountId          String
+  categoryId         String?
+  type               TxType
+  amountArs          Decimal
+  amountUsd          Decimal
+  exchangeRate       Decimal
+  currency           String
+  description        String?
+  paymentMethod      String?
+  transactionDate    DateTime
+  dueDate            DateTime?
+  status             TxStatus
+  isRecurring        Boolean  @default(false)
+  recurringRule      String?
+  installmentTotal   Int?
+  installmentCurrent Int?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account  Account   @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  category Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  @@index([userId, transactionDate])
+  @@index([accountId])
+  @@index([categoryId])
+  @@index([status])
+}
+
+model Category {
+  id       String  @id @default(cuid())
+  userId   String
+  name     String
+  type     String
+  color    String
+  icon     String
+  parentId String?
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@index([userId])
+  @@index([parentId])
+}
+
+model Investment {
+  id                     String   @id @default(cuid())
+  userId                 String
+  symbol                 String
+  name                   String
+  assetType              String
+  quantity               Decimal
+  purchasePriceUsd       Decimal
+  purchasePriceArs       Decimal
+  purchaseDate           DateTime
+  exchangeRateAtPurchase Decimal
+  notes                  String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model SavingsGoal {
+  id            String    @id @default(cuid())
+  userId        String
+  name          String
+  targetAmount  Decimal
+  currency      String
+  targetDate    DateTime?
+  currentAmount Decimal   @default(0)
+  status        String    @default("wishlist")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model ExchangeRate {
+  id        String   @id @default(cuid())
+  date      DateTime
+  rateType  String
+  rate      Decimal
+  source    String
+  createdAt DateTime @default(now())
+
+  @@unique([date, rateType])
+  @@index([rateType, date])
+}
+
+model MonthlySummary {
+  id          String   @id @default(cuid())
+  userId      String
+  year        Int
+  month       Int
+  aiInsight   String?
+  healthScore Int?
+  generatedAt DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, year, month])
+}
