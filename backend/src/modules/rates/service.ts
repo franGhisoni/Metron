@@ -1,5 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
-import type Redis from "ioredis";
+import type { Redis } from "ioredis";
 import { request } from "undici";
 import { env } from "../../config/env.js";
 import { logger } from "../../lib/logger.js";
@@ -72,7 +72,7 @@ export const refreshAllRates = async (
 
       result[type] = rate;
     } catch (err) {
-      logger.error({ err, type }, "failed to refresh exchange rate");
+      logger.error("failed to refresh exchange rate", { err, type });
     }
   }
   return result;

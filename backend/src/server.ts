@@ -67,7 +67,7 @@ const start = async () => {
   try {
     app = await buildServer();
   } catch (err) {
-    logger.error({ err }, "failed to build server");
+    logger.error("failed to build server", { err });
     process.exit(1);
   }
 

@@ -1,5 +1,5 @@
 import type { Transaction } from "@prisma/client";
-import { Decimal, serializeDecimal, toDecimal } from "../../lib/decimal.js";
+import { ROUND_HALF_UP, serializeDecimal, toDecimal } from "../../lib/decimal.js";
 
 export const serializeTransaction = (t: Transaction) => ({
   id: t.id,
@@ -35,11 +35,11 @@ export const computeDualAmounts = (
   if (currency === "ARS") {
     return {
       amountArs: amt.toString(),
-      amountUsd: amt.div(r).toDecimalPlaces(6, Decimal.ROUND_HALF_UP).toString(),
+      amountUsd: amt.div(r).toDecimalPlaces(6, ROUND_HALF_UP).toString(),
     };
   }
   return {
-    amountArs: amt.mul(r).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toString(),
+    amountArs: amt.mul(r).toDecimalPlaces(2, ROUND_HALF_UP).toString(),
     amountUsd: amt.toString(),
   };
 };
