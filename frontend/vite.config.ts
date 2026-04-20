@@ -1,7 +1,10 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
-import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
+
+const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig({
   plugins: [
@@ -32,9 +35,7 @@ export default defineConfig({
         globPatterns: ["**/*.{js,css,html,ico,png,svg}"],
         runtimeCaching: [
           {
-            // Cache API GETs for offline viewing of last-known data.
-            urlPattern: ({ url, request }) =>
-              request.method === "GET" && url.pathname.startsWith("/api/"),
+            urlPattern: /^\/api\//,
             handler: "NetworkFirst",
             options: {
               cacheName: "metron-api",
@@ -45,14 +46,12 @@ export default defineConfig({
           },
         ],
       },
-      devOptions: {
-        enabled: false,
-      },
+      devOptions: { enabled: false },
     }),
   ],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": resolve(__dirname, "src"),
     },
   },
   server: {
