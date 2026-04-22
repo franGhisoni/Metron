@@ -24,6 +24,7 @@ export type Account = {
 
 export type TxType = "income" | "expense" | "transfer";
 export type TxStatus = "paid" | "pending" | "scheduled";
+export type RecurringRule = "weekly" | "biweekly" | "monthly" | "yearly";
 
 export type Transaction = {
   id: string;
@@ -40,7 +41,9 @@ export type Transaction = {
   dueDate: string | null;
   status: TxStatus;
   isRecurring: boolean;
-  recurringRule: string | null;
+  recurringRule: RecurringRule | null;
+  recurringParentId: string | null;
+  linkedTransactionId: string | null;
   installmentTotal: number | null;
   installmentCurrent: number | null;
   createdAt: string;
@@ -79,7 +82,7 @@ export type CreditCardStatus = {
   currentDueDate: string;
   nextCloseDate: string;
   nextDueDate: string;
-  currentStatement: { totalArs: string; totalUsd: string };
-  nextStatement: { totalArs: string; totalUsd: string };
+  currentStatement: { ars: string; usd: string };
+  nextStatement: { ars: string; usd: string };
   utilization: number | null;
 };

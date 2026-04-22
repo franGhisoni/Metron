@@ -8,6 +8,7 @@ const DecimalString = z
 export const TX_TYPES = ["income", "expense", "transfer"] as const;
 export const TX_STATUSES = ["paid", "pending", "scheduled"] as const;
 export const CURRENCIES = ["ARS", "USD"] as const;
+export const RECURRING_RULES = ["weekly", "biweekly", "monthly", "yearly"] as const;
 
 export const CreateTransactionBody = z.object({
   accountId: z.string().min(1),
@@ -21,7 +22,7 @@ export const CreateTransactionBody = z.object({
   dueDate: z.string().datetime().optional(),
   status: z.enum(TX_STATUSES),
   isRecurring: z.boolean().default(false),
-  recurringRule: z.string().trim().max(200).optional(),
+  recurringRule: z.enum(RECURRING_RULES).optional(),
   installmentTotal: z.number().int().positive().max(120).optional(),
   installmentCurrent: z.number().int().positive().max(120).optional(),
   // Optional: caller can override the exchange rate (e.g. historical import).

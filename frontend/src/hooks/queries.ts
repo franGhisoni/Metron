@@ -91,6 +91,41 @@ export const useDeleteTransaction = () => {
   });
 };
 
+export const useCreateCategory = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: Record<string, unknown>) =>
+      (await api.post<Category>("/api/categories", body)).data,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["categories"] });
+    },
+  });
+};
+
+export const useUpdateCategory = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...body }: { id: string } & Record<string, unknown>) =>
+      (await api.put<Category>(`/api/categories/${id}`, body)).data,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["categories"] });
+    },
+  });
+};
+
+export const useDeleteCategory = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/api/categories/${id}`);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["categories"] });
+      void qc.invalidateQueries({ queryKey: ["transactions"] });
+    },
+  });
+};
+
 export const useCreateAccount = () => {
   const qc = useQueryClient();
   return useMutation({
@@ -98,6 +133,29 @@ export const useCreateAccount = () => {
       (await api.post<Account>("/api/accounts", body)).data,
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["accounts"] });
+    },
+  });
+};
+
+export const usePayCreditCard = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      ccAccountId,
+      ...body
+    }: {
+      ccAccountId: string;
+      sourceAccountId: string;
+      amount: string;
+      currency: "ARS" | "USD";
+      transactionDate: string;
+      description?: string;
+    }) => (await api.post(`/api/accounts/${ccAccountId}/pay`, body)).data,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["accounts"] });
+      void qc.invalidateQueries({ queryKey: ["transactions"] });
+      void qc.invalidateQueries({ queryKey: ["creditCardStatus"] });
+      void qc.invalidateQueries({ queryKey: ["summary"] });
     },
   });
 };

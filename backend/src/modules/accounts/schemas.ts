@@ -47,3 +47,12 @@ export const UpdateAccountBody = CreateAccountBase.partial();
 export type UpdateAccountBody = z.infer<typeof UpdateAccountBody>;
 
 export const AccountIdParam = z.object({ id: z.string().min(1) });
+
+export const PayCreditCardBody = z.object({
+  sourceAccountId: z.string().min(1),
+  amount: DecimalString,
+  currency: z.enum(CURRENCIES),
+  transactionDate: z.string().datetime(),
+  description: z.string().trim().max(500).optional(),
+});
+export type PayCreditCardBody = z.infer<typeof PayCreditCardBody>;

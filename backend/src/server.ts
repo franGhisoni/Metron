@@ -19,6 +19,7 @@ import categoryRoutes from "./modules/categories/routes.js";
 import rateRoutes from "./modules/rates/routes.js";
 import whatsappRoutes from "./modules/webhooks/whatsapp.js";
 import { startRateFetchJob } from "./modules/rates/job.js";
+import { startRecurringJob } from "./modules/transactions/recurringJob.js";
 
 const buildServer = async () => {
   // Fastify uses Pino internally — don't pass a Winston instance as loggerInstance.
@@ -83,6 +84,7 @@ const start = async () => {
 
   try {
     startRateFetchJob(app);          // register onClose hook before listen
+    startRecurringJob(app);
     await app.listen({ port: env.PORT, host: "0.0.0.0" });
   } catch (err) {
     app.log.error({ err }, "failed to start server");

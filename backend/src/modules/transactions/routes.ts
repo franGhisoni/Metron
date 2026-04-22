@@ -66,6 +66,11 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
     const rate = body.exchangeRate ?? (await getCurrentRate(app.prisma, app.redis, "blue"));
     const { amountArs, amountUsd } = computeDualAmounts(body.amount, body.currency, rate);
 
+    // Credit-card txs are always recorded as "paid" — the purchase has happened
+    // and becomes part of the statement. Whether the statement itself is paid
+    // is tracked separately via payment transfers, not this field.
+    const effectiveStatus = account.type === "credit_card" ? "paid" : body.status;
+
     const created = await app.prisma.transaction.create({
       data: {
         userId: req.userId,
@@ -80,7 +85,7 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
         paymentMethod: body.paymentMethod ?? null,
         transactionDate: new Date(body.transactionDate),
         dueDate: body.dueDate ? new Date(body.dueDate) : null,
-        status: body.status,
+        status: effectiveStatus,
         isRecurring: body.isRecurring,
         recurringRule: body.recurringRule ?? null,
         installmentTotal: body.installmentTotal ?? null,
@@ -91,7 +96,7 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
     // For paid, non-credit-card transactions, update the account balance.
     // Credit-card balances represent debt and are computed from statement logic,
     // so we don't mutate them here.
-    if (body.status === "paid" && account.type !== "credit_card") {
+    if (effectiveStatus === "paid" && account.type !== "credit_card") {
       const delta =
         body.type === "income"
           ? toPrismaDecimal(body.currency === account.currency ? body.amount : amountArs)
@@ -120,12 +125,37 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
     });
     if (!existing) return reply.code(404).send({ error: "not_found" });
 
+    // Determine target account (account may be changing) and force CC txs to paid.
+    const targetAccountId = body.accountId ?? existing.accountId;
+    const targetAccount = await app.prisma.account.findFirst({
+      where: { id: targetAccountId, userId: req.userId },
+      select: { type: true },
+    });
+    const forcePaid = targetAccount?.type === "credit_card";
+    const effectiveStatus = forcePaid ? "paid" : body.status;
+
     // Recompute dual amounts if amount/currency/rate changed.
+    // Also: when a recurring child transitions scheduled/pending → paid, snap the
+    // exchange rate to TODAY so the historical record reflects the rate actually used.
     // TODO: Phase 2 — rebalance account balance on edits.
     let derived: { amountArs?: string; amountUsd?: string; exchangeRate?: string } = {};
-    if (body.amount !== undefined || body.currency !== undefined || body.exchangeRate !== undefined) {
+    const transitionToPaid =
+      body.status === "paid" &&
+      existing.status !== "paid" &&
+      existing.recurringParentId !== null;
+
+    if (
+      body.amount !== undefined ||
+      body.currency !== undefined ||
+      body.exchangeRate !== undefined ||
+      transitionToPaid
+    ) {
       const currency = (body.currency ?? existing.currency) as "ARS" | "USD";
-      const rate = body.exchangeRate ?? existing.exchangeRate.toString();
+      const rate =
+        body.exchangeRate ??
+        (transitionToPaid
+          ? await getCurrentRate(app.prisma, app.redis, "blue")
+          : existing.exchangeRate.toString());
       const amountInCurrency =
         body.amount ??
         (currency === "ARS" ? existing.amountArs.toString() : existing.amountUsd.toString());
@@ -148,7 +178,7 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
         ...(body.dueDate !== undefined
           ? { dueDate: body.dueDate ? new Date(body.dueDate) : null }
           : {}),
-        ...(body.status !== undefined ? { status: body.status } : {}),
+        ...(effectiveStatus !== undefined ? { status: effectiveStatus } : {}),
         ...(body.isRecurring !== undefined ? { isRecurring: body.isRecurring } : {}),
         ...(body.recurringRule !== undefined ? { recurringRule: body.recurringRule } : {}),
         ...(body.installmentTotal !== undefined

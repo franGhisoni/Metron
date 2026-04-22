@@ -17,6 +17,8 @@ export const serializeTransaction = (t: Transaction) => ({
   status: t.status,
   isRecurring: t.isRecurring,
   recurringRule: t.recurringRule,
+  recurringParentId: t.recurringParentId,
+  linkedTransactionId: t.linkedTransactionId,
   installmentTotal: t.installmentTotal,
   installmentCurrent: t.installmentCurrent,
   createdAt: t.createdAt.toISOString(),

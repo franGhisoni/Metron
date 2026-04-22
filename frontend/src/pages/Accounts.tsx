@@ -7,6 +7,7 @@ import {
   useCreateAccount,
   useCreditCardStatus,
   useDeleteAccount,
+  usePayCreditCard,
 } from "../hooks/queries";
 import { fmtDate, fmtMoney } from "../lib/money";
 import type { Account } from "../lib/types";
@@ -152,7 +153,12 @@ export default function AccountsPage() {
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {(accountsQ.data ?? []).map((a) => (
-          <AccountCard key={a.id} account={a} onDelete={() => void delAcc.mutate(a.id)} />
+          <AccountCard
+            key={a.id}
+            account={a}
+            allAccounts={accountsQ.data ?? []}
+            onDelete={() => void delAcc.mutate(a.id)}
+          />
         ))}
         {accountsQ.data?.length === 0 && (
           <div className="rounded-xl border border-dashed border-slate-700 p-6 text-center text-slate-500">
@@ -166,12 +172,15 @@ export default function AccountsPage() {
 
 const AccountCard = ({
   account,
+  allAccounts,
   onDelete,
 }: {
   account: Account;
+  allAccounts: Account[];
   onDelete: () => void;
 }) => {
   const ccQ = useCreditCardStatus(account.type === "credit_card" ? account.id : null);
+  const [payOpen, setPayOpen] = useState(false);
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
       <div className="flex items-start justify-between">
@@ -199,33 +208,172 @@ const AccountCard = ({
                 <span className="text-slate-100">{fmtDate(ccQ.data.currentDueDate)}</span>
               </div>
               <div>
-                Resumen actual:{" "}
-                <span className="text-slate-100">
-                  {fmtMoney(
-                    account.currency === "ARS"
-                      ? ccQ.data.currentStatement.totalArs
-                      : ccQ.data.currentStatement.totalUsd,
-                    account.currency
-                  )}
-                </span>
+                Resumen actual:
+                <StatementBreakdown ars={ccQ.data.currentStatement.ars} usd={ccQ.data.currentStatement.usd} />
               </div>
               <div>
-                Próximo resumen:{" "}
-                <span className="text-slate-100">
-                  {fmtMoney(
-                    account.currency === "ARS"
-                      ? ccQ.data.nextStatement.totalArs
-                      : ccQ.data.nextStatement.totalUsd,
-                    account.currency
-                  )}
-                </span>
+                Próximo resumen:
+                <StatementBreakdown ars={ccQ.data.nextStatement.ars} usd={ccQ.data.nextStatement.usd} />
               </div>
             </>
           ) : (
             <div className="text-slate-500">Cargando estado de tarjeta…</div>
           )}
+          <div className="pt-2">
+            <button
+              onClick={() => setPayOpen(true)}
+              className="w-full rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-500"
+            >
+              Pagar tarjeta
+            </button>
+          </div>
         </div>
       )}
+      {payOpen && (
+        <PayModal
+          cc={account}
+          sources={allAccounts.filter((a) => a.type !== "credit_card" && a.id !== account.id)}
+          onClose={() => setPayOpen(false)}
+        />
+      )}
+    </div>
+  );
+};
+
+const StatementBreakdown = ({ ars, usd }: { ars: string; usd: string }) => {
+  const hasArs = Number(ars) !== 0;
+  const hasUsd = Number(usd) !== 0;
+  if (!hasArs && !hasUsd) {
+    return <span className="ml-1 text-slate-100">{fmtMoney("0", "ARS")}</span>;
+  }
+  return (
+    <span className="ml-1 inline-flex flex-wrap gap-x-3 text-slate-100">
+      {hasArs && <span>{fmtMoney(ars, "ARS")}</span>}
+      {hasUsd && <span>{fmtMoney(usd, "USD")}</span>}
+    </span>
+  );
+};
+
+const PayModal = ({
+  cc,
+  sources,
+  onClose,
+}: {
+  cc: Account;
+  sources: Account[];
+  onClose: () => void;
+}) => {
+  const pay = usePayCreditCard();
+  const [sourceId, setSourceId] = useState(sources[0]?.id ?? "");
+  const [amount, setAmount] = useState("");
+  const [currency, setCurrency] = useState<"ARS" | "USD">(cc.currency);
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [description, setDescription] = useState("");
+
+  const submit = async () => {
+    if (!sourceId || !amount) return;
+    await pay.mutateAsync({
+      ccAccountId: cc.id,
+      sourceAccountId: sourceId,
+      amount,
+      currency,
+      transactionDate: new Date(date + "T12:00:00Z").toISOString(),
+      description: description || undefined,
+    });
+    onClose();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 text-base font-semibold">Pagar {cc.name}</div>
+        {sources.length === 0 ? (
+          <div className="text-sm text-slate-400">
+            No tenés cuentas no-tarjeta para pagar desde.
+          </div>
+        ) : (
+          <div className="grid gap-3">
+            <label className="block space-y-1">
+              <span className="text-xs uppercase tracking-wide text-slate-400">
+                Cuenta origen
+              </span>
+              <select
+                value={sourceId}
+                onChange={(e) => setSourceId(e.target.value)}
+                className={inputCls}
+              >
+                {sources.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} ({s.currency} · {fmtMoney(s.balance, s.currency)})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="grid grid-cols-[1fr_6rem] gap-2">
+              <label className="block space-y-1">
+                <span className="text-xs uppercase tracking-wide text-slate-400">Monto</span>
+                <input
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  className={inputCls}
+                  placeholder="0.00"
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-xs uppercase tracking-wide text-slate-400">Moneda</span>
+                <select
+                  value={currency}
+                  onChange={(e) => setCurrency(e.target.value as "ARS" | "USD")}
+                  className={inputCls}
+                >
+                  <option>ARS</option>
+                  <option>USD</option>
+                </select>
+              </label>
+            </div>
+            <label className="block space-y-1">
+              <span className="text-xs uppercase tracking-wide text-slate-400">Fecha</span>
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className={inputCls}
+              />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs uppercase tracking-wide text-slate-400">
+                Descripción (opcional)
+              </span>
+              <input
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className={inputCls}
+              />
+            </label>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={onClose}
+                className="rounded-md border border-slate-700 px-3 py-2 text-sm"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => void submit()}
+                disabled={pay.isPending || !sourceId || !amount}
+                className="rounded-md bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-50"
+              >
+                {pay.isPending ? "Pagando…" : "Confirmar pago"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

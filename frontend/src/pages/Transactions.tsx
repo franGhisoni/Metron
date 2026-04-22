@@ -20,6 +20,8 @@ const FormSchema = z.object({
   description: z.string().optional(),
   transactionDate: z.string().min(1),
   status: z.enum(["paid", "pending", "scheduled"]),
+  isRecurring: z.boolean().default(false),
+  recurringRule: z.enum(["weekly", "biweekly", "monthly", "yearly"]).optional(),
 });
 type FormIn = z.infer<typeof FormSchema>;
 
@@ -46,10 +48,15 @@ export default function TransactionsPage() {
       currency: "ARS",
       status: "paid",
       transactionDate: today(),
+      isRecurring: false,
     },
   });
 
   const currentType = watch("type");
+  const isRecurring = watch("isRecurring");
+  const selectedAccountId = watch("accountId");
+  const selectedAccount = (accountsQ.data ?? []).find((a) => a.id === selectedAccountId);
+  const isCcAccount = selectedAccount?.type === "credit_card";
   const filteredCats = (categoriesQ.data ?? []).filter(
     (c) => currentType === "transfer" || c.type === currentType
   );
@@ -63,7 +70,9 @@ export default function TransactionsPage() {
       currency: data.currency,
       description: data.description || undefined,
       transactionDate: new Date(data.transactionDate + "T12:00:00Z").toISOString(),
-      status: data.status,
+      status: isCcAccount ? "paid" : data.status,
+      isRecurring: data.isRecurring,
+      recurringRule: data.isRecurring ? (data.recurringRule ?? "monthly") : undefined,
     });
     reset({
       type: data.type,
@@ -71,6 +80,7 @@ export default function TransactionsPage() {
       status: "paid",
       transactionDate: today(),
       accountId: data.accountId,
+      isRecurring: false,
     });
   };
 
@@ -124,15 +134,37 @@ export default function TransactionsPage() {
         <Field label="Fecha" error={errors.transactionDate?.message}>
           <input type="date" {...register("transactionDate")} className={inputCls} />
         </Field>
-        <Field label="Estado">
-          <select {...register("status")} className={selectCls}>
-            <option value="paid">Pagado</option>
-            <option value="pending">Pendiente</option>
-            <option value="scheduled">Programado</option>
-          </select>
-        </Field>
+        {!isCcAccount && (
+          <Field label="Estado">
+            <select {...register("status")} className={selectCls}>
+              <option value="paid">Pagado</option>
+              <option value="pending">Pendiente</option>
+              <option value="scheduled">Programado</option>
+            </select>
+          </Field>
+        )}
         <Field label="Descripción">
           <input {...register("description")} className={inputCls} placeholder="Opcional" />
+        </Field>
+        <Field label="Recurrente">
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                {...register("isRecurring")}
+                className="h-4 w-4 accent-brand-500"
+              />
+              <span className="text-slate-300">Sí</span>
+            </label>
+            {isRecurring && (
+              <select {...register("recurringRule")} className={selectCls + " flex-1"}>
+                <option value="monthly">Mensual</option>
+                <option value="weekly">Semanal</option>
+                <option value="biweekly">Quincenal</option>
+                <option value="yearly">Anual</option>
+              </select>
+            )}
+          </div>
         </Field>
         <div className="flex items-end">
           <button
@@ -181,7 +213,17 @@ export default function TransactionsPage() {
               return (
                 <tr key={t.id} className="border-t border-slate-800 hover:bg-slate-900/60">
                   <td className="px-3 py-2 text-slate-400">{fmtDate(t.transactionDate)}</td>
-                  <td className="px-3 py-2">{t.description ?? "—"}</td>
+                  <td className="px-3 py-2">
+                    {(t.isRecurring || t.recurringParentId) && (
+                      <span
+                        title={t.isRecurring ? "Plantilla recurrente" : "Generada por recurrencia"}
+                        className="mr-1 text-indigo-400"
+                      >
+                        ↻
+                      </span>
+                    )}
+                    {t.description ?? "—"}
+                  </td>
                   <td className="px-3 py-2">
                     {cat ? (
                       <span>
@@ -206,9 +248,13 @@ export default function TransactionsPage() {
                     {fmtMoney(displayAmount, t.currency)}
                   </td>
                   <td className="px-3 py-2">
-                    <span className="rounded-full border border-slate-700 px-2 py-0.5 text-xs text-slate-300">
-                      {t.status}
-                    </span>
+                    {acc?.type === "credit_card" ? (
+                      <span className="text-xs text-slate-500">—</span>
+                    ) : (
+                      <span className="rounded-full border border-slate-700 px-2 py-0.5 text-xs text-slate-300">
+                        {t.status}
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-right">
                     <button

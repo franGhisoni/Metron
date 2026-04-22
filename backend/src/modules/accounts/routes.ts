@@ -1,8 +1,15 @@
 import type { FastifyPluginAsync } from "fastify";
-import { AccountIdParam, CreateAccountBody, UpdateAccountBody } from "./schemas.js";
+import {
+  AccountIdParam,
+  CreateAccountBody,
+  PayCreditCardBody,
+  UpdateAccountBody,
+} from "./schemas.js";
 import { assertAccountOwned, serializeAccount } from "./service.js";
 import { assignStatement, computeCreditCardStatus } from "./creditCard.js";
 import { toPrismaDecimal, serializeDecimal, Decimal } from "../../lib/decimal.js";
+import { getCurrentRate } from "../rates/service.js";
+import { computeDualAmounts, serializeTransaction } from "../transactions/service.js";
 
 const accountRoutes: FastifyPluginAsync = async (app) => {
   app.addHook("onRequest", app.authenticate);
@@ -85,14 +92,18 @@ const accountRoutes: FastifyPluginAsync = async (app) => {
     const today = new Date();
     const status = computeCreditCardStatus(acc.closingDay, acc.dueDaysAfterClosing, today);
 
-    // Sum pending statement totals from transactions on this card.
+    // Statement = charges (expenses) minus payments (incoming transfers).
+    // Breakdown by ORIGINAL currency of each tx (not converted) — a card can carry
+    // both ARS and USD charges side-by-side (e.g. local purchases + Netflix).
     const txs = await app.prisma.transaction.findMany({
       where: {
         userId: req.userId,
         accountId: id,
-        type: "expense",
+        type: { in: ["expense", "transfer"] },
       },
       select: {
+        type: true,
+        currency: true,
         amountArs: true,
         amountUsd: true,
         transactionDate: true,
@@ -103,25 +114,28 @@ const accountRoutes: FastifyPluginAsync = async (app) => {
     let currentUsd = new Decimal(0);
     let nextArs = new Decimal(0);
     let nextUsd = new Decimal(0);
+    // Parallel tally in CARD currency (using dual amounts) for utilization only.
+    let currentInCardCurrency = new Decimal(0);
 
     for (const tx of txs) {
       const bucket = assignStatement(tx.transactionDate, today, acc.closingDay);
+      const sign = tx.type === "expense" ? 1 : -1;
+      const isArs = tx.currency === "ARS";
+      const originalAmount = new Decimal((isArs ? tx.amountArs : tx.amountUsd).toString()).mul(sign);
       if (bucket === "current") {
-        currentArs = currentArs.plus(tx.amountArs.toString());
-        currentUsd = currentUsd.plus(tx.amountUsd.toString());
+        if (isArs) currentArs = currentArs.plus(originalAmount);
+        else currentUsd = currentUsd.plus(originalAmount);
+        const inCard =
+          acc.currency === "ARS" ? tx.amountArs.toString() : tx.amountUsd.toString();
+        currentInCardCurrency = currentInCardCurrency.plus(new Decimal(inCard).mul(sign));
       } else {
-        nextArs = nextArs.plus(tx.amountArs.toString());
-        nextUsd = nextUsd.plus(tx.amountUsd.toString());
+        if (isArs) nextArs = nextArs.plus(originalAmount);
+        else nextUsd = nextUsd.plus(originalAmount);
       }
     }
 
     const creditLimit = serializeDecimal(acc.creditLimit);
-    const utilization =
-      creditLimit && acc.currency === "ARS"
-        ? currentArs.div(creditLimit).toNumber()
-        : creditLimit && acc.currency === "USD"
-          ? currentUsd.div(creditLimit).toNumber()
-          : null;
+    const utilization = creditLimit ? currentInCardCurrency.div(creditLimit).toNumber() : null;
 
     return reply.send({
       accountId: acc.id,
@@ -129,14 +143,108 @@ const accountRoutes: FastifyPluginAsync = async (app) => {
       creditLimit,
       ...status,
       currentStatement: {
-        totalArs: currentArs.toString(),
-        totalUsd: currentUsd.toString(),
+        ars: currentArs.toString(),
+        usd: currentUsd.toString(),
       },
       nextStatement: {
-        totalArs: nextArs.toString(),
-        totalUsd: nextUsd.toString(),
+        ars: nextArs.toString(),
+        usd: nextUsd.toString(),
       },
       utilization,
+    });
+  });
+
+  app.post("/:id/pay", async (req, reply) => {
+    const { id } = AccountIdParam.parse(req.params);
+    const body = PayCreditCardBody.parse(req.body);
+
+    const cc = await assertAccountOwned(app.prisma, id, req.userId);
+    if (!cc) return reply.code(404).send({ error: "not_found" });
+    if (cc.type !== "credit_card") {
+      return reply.code(400).send({ error: "not_a_credit_card" });
+    }
+    if (body.sourceAccountId === id) {
+      return reply.code(400).send({ error: "source_equals_destination" });
+    }
+
+    const source = await assertAccountOwned(app.prisma, body.sourceAccountId, req.userId);
+    if (!source) return reply.code(404).send({ error: "source_not_found" });
+    if (source.type === "credit_card") {
+      return reply.code(400).send({ error: "source_cannot_be_credit_card" });
+    }
+
+    const rate = await getCurrentRate(app.prisma, app.redis, "blue");
+    const { amountArs, amountUsd } = computeDualAmounts(body.amount, body.currency, rate);
+    const txDate = new Date(body.transactionDate);
+
+    const sourceName = source.name;
+    const ccName = cc.name;
+    const sourceDescription = body.description ?? `Pago tarjeta ${ccName}`;
+    const ccDescription = body.description ?? `Pago recibido desde ${sourceName}`;
+
+    // Deduct from source account in its own currency (convert if mismatched).
+    const sourceDelta =
+      body.currency === source.currency
+        ? body.amount
+        : source.currency === "ARS"
+          ? amountArs
+          : amountUsd;
+
+    const [sourceTx, ccTx] = await app.prisma.$transaction(async (tx) => {
+      const created1 = await tx.transaction.create({
+        data: {
+          userId: req.userId,
+          accountId: source.id,
+          categoryId: null,
+          type: "transfer",
+          amountArs: toPrismaDecimal(amountArs),
+          amountUsd: toPrismaDecimal(amountUsd),
+          exchangeRate: toPrismaDecimal(rate),
+          currency: body.currency,
+          description: sourceDescription,
+          paymentMethod: null,
+          transactionDate: txDate,
+          dueDate: null,
+          status: "paid",
+          isRecurring: false,
+          recurringRule: null,
+        },
+      });
+      const created2 = await tx.transaction.create({
+        data: {
+          userId: req.userId,
+          accountId: cc.id,
+          categoryId: null,
+          type: "transfer",
+          amountArs: toPrismaDecimal(amountArs),
+          amountUsd: toPrismaDecimal(amountUsd),
+          exchangeRate: toPrismaDecimal(rate),
+          currency: body.currency,
+          description: ccDescription,
+          paymentMethod: null,
+          transactionDate: txDate,
+          dueDate: null,
+          status: "paid",
+          isRecurring: false,
+          recurringRule: null,
+          linkedTransactionId: created1.id,
+        },
+      });
+      await tx.transaction.update({
+        where: { id: created1.id },
+        data: { linkedTransactionId: created2.id },
+      });
+      await tx.account.update({
+        where: { id: source.id },
+        data: { balance: { increment: toPrismaDecimal("-" + sourceDelta) } },
+      });
+      const refreshedSource = await tx.transaction.findUnique({ where: { id: created1.id } });
+      return [refreshedSource!, created2] as const;
+    });
+
+    return reply.code(201).send({
+      sourceTransaction: serializeTransaction(sourceTx),
+      creditCardTransaction: serializeTransaction(ccTx),
     });
   });
 };

@@ -1,3 +1,4 @@
+import CategoriesManager from "../components/CategoriesManager";
 import { useAuth } from "../lib/auth";
 
 // TODO: Phase 1b — wire /api/users/me PATCH endpoint + form to edit
@@ -18,6 +19,7 @@ export default function SettingsPage() {
           Edición de perfil disponible próximamente. (Fase 1b)
         </p>
       </div>
+      <CategoriesManager />
     </div>
   );
 }
