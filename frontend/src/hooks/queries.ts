@@ -32,9 +32,12 @@ export const useRates = () =>
 export const useTransactions = (params: {
   accountId?: string;
   categoryId?: string;
+  type?: "income" | "expense" | "transfer";
+  status?: "paid" | "pending" | "scheduled";
   from?: string;
   to?: string;
   limit?: number;
+  cursor?: string;
 }) =>
   useQuery({
     queryKey: ["transactions", params],
