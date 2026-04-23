@@ -13,6 +13,53 @@ import { getCurrentRate } from "../rates/service.js";
 import { assertAccountOwned } from "../accounts/service.js";
 import { Decimal, toPrismaDecimal } from "../../lib/decimal.js";
 
+type BalanceAwareTx = {
+  type: "income" | "expense" | "transfer";
+  status: "paid" | "pending" | "scheduled";
+  amountArs: string;
+  amountUsd: string;
+};
+
+type BalanceAwareAccount = {
+  id: string;
+  currency: "ARS" | "USD";
+  type: string;
+};
+
+const getBalanceDelta = (
+  tx: BalanceAwareTx,
+  account: BalanceAwareAccount,
+  linkedCounterpartAccountType: string | null = null
+): Decimal | null => {
+  if (account.type === "credit_card" || tx.status !== "paid") return null;
+
+  const amount = new Decimal(account.currency === "ARS" ? tx.amountArs : tx.amountUsd);
+
+  if (tx.type === "income") return amount;
+  if (tx.type === "expense") return amount.negated();
+
+  // Credit-card payments are represented as linked transfer pairs:
+  // the non-card side reduces the source account balance.
+  if (tx.type === "transfer" && linkedCounterpartAccountType === "credit_card") {
+    return amount.negated();
+  }
+
+  return null;
+};
+
+const applyBalanceDelta = async (
+  tx: Prisma.TransactionClient,
+  accountId: string,
+  delta: Decimal | null
+) => {
+  if (!delta || delta.isZero()) return;
+
+  await tx.account.update({
+    where: { id: accountId },
+    data: { balance: { increment: toPrismaDecimal(delta) } },
+  });
+};
+
 const transactionRoutes: FastifyPluginAsync = async (app) => {
   app.addHook("onRequest", app.authenticate);
 
@@ -66,52 +113,48 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
     const rate = body.exchangeRate ?? (await getCurrentRate(app.prisma, app.redis, "blue"));
     const { amountArs, amountUsd } = computeDualAmounts(body.amount, body.currency, rate);
 
-    // Credit-card txs are always recorded as "paid" — the purchase has happened
-    // and becomes part of the statement. Whether the statement itself is paid
-    // is tracked separately via payment transfers, not this field.
+    // Credit-card transactions are always paid: the purchase already happened.
     const effectiveStatus = account.type === "credit_card" ? "paid" : body.status;
-
-    const created = await app.prisma.transaction.create({
-      data: {
-        userId: req.userId,
-        accountId: body.accountId,
-        categoryId: body.categoryId ?? null,
+    const balanceDelta = getBalanceDelta(
+      {
         type: body.type,
-        amountArs: toPrismaDecimal(amountArs),
-        amountUsd: toPrismaDecimal(amountUsd),
-        exchangeRate: toPrismaDecimal(rate),
-        currency: body.currency,
-        description: body.description ?? null,
-        paymentMethod: body.paymentMethod ?? null,
-        transactionDate: new Date(body.transactionDate),
-        dueDate: body.dueDate ? new Date(body.dueDate) : null,
         status: effectiveStatus,
-        isRecurring: body.isRecurring,
-        recurringRule: body.recurringRule ?? null,
-        installmentTotal: body.installmentTotal ?? null,
-        installmentCurrent: body.installmentCurrent ?? null,
+        amountArs,
+        amountUsd,
       },
-    });
-
-    // For paid, non-credit-card transactions, update the account balance.
-    // Credit-card balances represent debt and are computed from statement logic,
-    // so we don't mutate them here.
-    if (effectiveStatus === "paid" && account.type !== "credit_card") {
-      const delta =
-        body.type === "income"
-          ? toPrismaDecimal(body.currency === account.currency ? body.amount : amountArs)
-          : body.type === "expense"
-            ? toPrismaDecimal(
-                "-" + (body.currency === account.currency ? body.amount : amountArs)
-              )
-            : null;
-      if (delta !== null) {
-        await app.prisma.account.update({
-          where: { id: account.id },
-          data: { balance: { increment: delta } },
-        });
+      {
+        id: account.id,
+        currency: account.currency as "ARS" | "USD",
+        type: account.type,
       }
-    }
+    );
+
+    const created = await app.prisma.$transaction(async (tx) => {
+      const row = await tx.transaction.create({
+        data: {
+          userId: req.userId,
+          accountId: body.accountId,
+          categoryId: body.categoryId ?? null,
+          type: body.type,
+          amountArs: toPrismaDecimal(amountArs),
+          amountUsd: toPrismaDecimal(amountUsd),
+          exchangeRate: toPrismaDecimal(rate),
+          currency: body.currency,
+          description: body.description ?? null,
+          paymentMethod: body.paymentMethod ?? null,
+          transactionDate: new Date(body.transactionDate),
+          dueDate: body.dueDate ? new Date(body.dueDate) : null,
+          status: effectiveStatus,
+          isRecurring: body.isRecurring,
+          recurringRule: body.recurringRule ?? null,
+          installmentTotal: body.installmentTotal ?? null,
+          installmentCurrent: body.installmentCurrent ?? null,
+        },
+      });
+
+      await applyBalanceDelta(tx, account.id, balanceDelta);
+      return row;
+    });
 
     return reply.code(201).send(serializeTransaction(created));
   });
@@ -122,22 +165,43 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
 
     const existing = await app.prisma.transaction.findFirst({
       where: { id, userId: req.userId },
+      include: {
+        account: {
+          select: { id: true, type: true, currency: true },
+        },
+      },
     });
     if (!existing) return reply.code(404).send({ error: "not_found" });
 
-    // Determine target account (account may be changing) and force CC txs to paid.
-    const targetAccountId = body.accountId ?? existing.accountId;
-    const targetAccount = await app.prisma.account.findFirst({
-      where: { id: targetAccountId, userId: req.userId },
-      select: { type: true },
-    });
-    const forcePaid = targetAccount?.type === "credit_card";
+    if (body.categoryId) {
+      const cat = await app.prisma.category.findFirst({
+        where: { id: body.categoryId, userId: req.userId },
+      });
+      if (!cat) return reply.code(404).send({ error: "category_not_found" });
+    }
+
+    const targetAccount =
+      body.accountId !== undefined
+        ? await assertAccountOwned(app.prisma, body.accountId, req.userId)
+        : existing.account;
+    if (!targetAccount) return reply.code(404).send({ error: "account_not_found" });
+
+    const forcePaid = targetAccount.type === "credit_card";
     const effectiveStatus = forcePaid ? "paid" : body.status;
+    const nextStatus = effectiveStatus ?? existing.status;
+
+    let linkedCounterpartAccountType: string | null = null;
+    if (existing.linkedTransactionId) {
+      const linked = await app.prisma.transaction.findUnique({
+        where: { id: existing.linkedTransactionId },
+        select: { account: { select: { type: true } } },
+      });
+      linkedCounterpartAccountType = linked?.account.type ?? null;
+    }
 
     // Recompute dual amounts if amount/currency/rate changed.
-    // Also: when a recurring child transitions scheduled/pending → paid, snap the
-    // exchange rate to TODAY so the historical record reflects the rate actually used.
-    // TODO: Phase 2 — rebalance account balance on edits.
+    // When a recurring child transitions scheduled/pending to paid, snap the
+    // exchange rate to today's rate so the record reflects what was actually used.
     let derived: { amountArs?: string; amountUsd?: string; exchangeRate?: string } = {};
     const transitionToPaid =
       body.status === "paid" &&
@@ -163,37 +227,75 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
       derived = { amountArs: dual.amountArs, amountUsd: dual.amountUsd, exchangeRate: rate };
     }
 
-    const updated = await app.prisma.transaction.update({
-      where: { id },
-      data: {
-        ...(body.accountId !== undefined ? { accountId: body.accountId } : {}),
-        ...(body.categoryId !== undefined ? { categoryId: body.categoryId } : {}),
-        ...(body.type !== undefined ? { type: body.type } : {}),
-        ...(body.currency !== undefined ? { currency: body.currency } : {}),
-        ...(body.description !== undefined ? { description: body.description } : {}),
-        ...(body.paymentMethod !== undefined ? { paymentMethod: body.paymentMethod } : {}),
-        ...(body.transactionDate !== undefined
-          ? { transactionDate: new Date(body.transactionDate) }
-          : {}),
-        ...(body.dueDate !== undefined
-          ? { dueDate: body.dueDate ? new Date(body.dueDate) : null }
-          : {}),
-        ...(effectiveStatus !== undefined ? { status: effectiveStatus } : {}),
-        ...(body.isRecurring !== undefined ? { isRecurring: body.isRecurring } : {}),
-        ...(body.recurringRule !== undefined ? { recurringRule: body.recurringRule } : {}),
-        ...(body.installmentTotal !== undefined
-          ? { installmentTotal: body.installmentTotal }
-          : {}),
-        ...(body.installmentCurrent !== undefined
-          ? { installmentCurrent: body.installmentCurrent }
-          : {}),
-        ...(derived.amountArs ? { amountArs: toPrismaDecimal(derived.amountArs) } : {}),
-        ...(derived.amountUsd ? { amountUsd: toPrismaDecimal(derived.amountUsd) } : {}),
-        ...(derived.exchangeRate
-          ? { exchangeRate: toPrismaDecimal(derived.exchangeRate) }
-          : {}),
+    const previousDelta = getBalanceDelta(
+      {
+        type: existing.type,
+        status: existing.status,
+        amountArs: existing.amountArs.toString(),
+        amountUsd: existing.amountUsd.toString(),
       },
+      {
+        id: existing.account.id,
+        currency: existing.account.currency as "ARS" | "USD",
+        type: existing.account.type,
+      },
+      linkedCounterpartAccountType
+    );
+
+    const nextDelta = getBalanceDelta(
+      {
+        type: body.type ?? existing.type,
+        status: nextStatus,
+        amountArs: derived.amountArs ?? existing.amountArs.toString(),
+        amountUsd: derived.amountUsd ?? existing.amountUsd.toString(),
+      },
+      {
+        id: targetAccount.id,
+        currency: targetAccount.currency as "ARS" | "USD",
+        type: targetAccount.type,
+      },
+      linkedCounterpartAccountType
+    );
+
+    const updated = await app.prisma.$transaction(async (tx) => {
+      await applyBalanceDelta(tx, existing.account.id, previousDelta?.negated() ?? null);
+
+      const row = await tx.transaction.update({
+        where: { id },
+        data: {
+          ...(body.accountId !== undefined ? { accountId: body.accountId } : {}),
+          ...(body.categoryId !== undefined ? { categoryId: body.categoryId } : {}),
+          ...(body.type !== undefined ? { type: body.type } : {}),
+          ...(body.currency !== undefined ? { currency: body.currency } : {}),
+          ...(body.description !== undefined ? { description: body.description } : {}),
+          ...(body.paymentMethod !== undefined ? { paymentMethod: body.paymentMethod } : {}),
+          ...(body.transactionDate !== undefined
+            ? { transactionDate: new Date(body.transactionDate) }
+            : {}),
+          ...(body.dueDate !== undefined
+            ? { dueDate: body.dueDate ? new Date(body.dueDate) : null }
+            : {}),
+          ...(effectiveStatus !== undefined ? { status: effectiveStatus } : {}),
+          ...(body.isRecurring !== undefined ? { isRecurring: body.isRecurring } : {}),
+          ...(body.recurringRule !== undefined ? { recurringRule: body.recurringRule } : {}),
+          ...(body.installmentTotal !== undefined
+            ? { installmentTotal: body.installmentTotal }
+            : {}),
+          ...(body.installmentCurrent !== undefined
+            ? { installmentCurrent: body.installmentCurrent }
+            : {}),
+          ...(derived.amountArs ? { amountArs: toPrismaDecimal(derived.amountArs) } : {}),
+          ...(derived.amountUsd ? { amountUsd: toPrismaDecimal(derived.amountUsd) } : {}),
+          ...(derived.exchangeRate
+            ? { exchangeRate: toPrismaDecimal(derived.exchangeRate) }
+            : {}),
+        },
+      });
+
+      await applyBalanceDelta(tx, targetAccount.id, nextDelta);
+      return row;
     });
+
     return reply.send(serializeTransaction(updated));
   });
 
@@ -201,11 +303,43 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
     const { id } = TxIdParam.parse(req.params);
     const existing = await app.prisma.transaction.findFirst({
       where: { id, userId: req.userId },
+      include: {
+        account: {
+          select: { id: true, type: true, currency: true },
+        },
+      },
     });
     if (!existing) return reply.code(404).send({ error: "not_found" });
 
-    // TODO: Phase 2 — rebalance account balance on delete for paid non-cc tx.
-    await app.prisma.transaction.delete({ where: { id } });
+    let linkedCounterpartAccountType: string | null = null;
+    if (existing.linkedTransactionId) {
+      const linked = await app.prisma.transaction.findUnique({
+        where: { id: existing.linkedTransactionId },
+        select: { account: { select: { type: true } } },
+      });
+      linkedCounterpartAccountType = linked?.account.type ?? null;
+    }
+
+    const previousDelta = getBalanceDelta(
+      {
+        type: existing.type,
+        status: existing.status,
+        amountArs: existing.amountArs.toString(),
+        amountUsd: existing.amountUsd.toString(),
+      },
+      {
+        id: existing.account.id,
+        currency: existing.account.currency as "ARS" | "USD",
+        type: existing.account.type,
+      },
+      linkedCounterpartAccountType
+    );
+
+    await app.prisma.$transaction(async (tx) => {
+      await tx.transaction.delete({ where: { id } });
+      await applyBalanceDelta(tx, existing.account.id, previousDelta?.negated() ?? null);
+    });
+
     return reply.code(204).send();
   });
 
@@ -234,16 +368,16 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
     let expenseUsd = new Decimal(0);
     const byCategory: Record<string, { ars: Decimal; usd: Decimal }> = {};
 
-    for (const r of rows) {
-      const ars = new Decimal(r.amountArs.toString());
-      const usd = new Decimal(r.amountUsd.toString());
-      if (r.type === "income") {
+    for (const row of rows) {
+      const ars = new Decimal(row.amountArs.toString());
+      const usd = new Decimal(row.amountUsd.toString());
+      if (row.type === "income") {
         incomeArs = incomeArs.plus(ars);
         incomeUsd = incomeUsd.plus(usd);
-      } else if (r.type === "expense") {
+      } else if (row.type === "expense") {
         expenseArs = expenseArs.plus(ars);
         expenseUsd = expenseUsd.plus(usd);
-        const key = r.categoryId ?? "__uncategorized__";
+        const key = row.categoryId ?? "__uncategorized__";
         const bucket = byCategory[key] ?? { ars: new Decimal(0), usd: new Decimal(0) };
         bucket.ars = bucket.ars.plus(ars);
         bucket.usd = bucket.usd.plus(usd);
@@ -262,10 +396,10 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
       expense: { ars: expenseArs.toString(), usd: expenseUsd.toString() },
       net: { ars: netArs.toString(), usd: netUsd.toString() },
       savingsRate,
-      byCategory: Object.entries(byCategory).map(([categoryId, v]) => ({
+      byCategory: Object.entries(byCategory).map(([categoryId, value]) => ({
         categoryId: categoryId === "__uncategorized__" ? null : categoryId,
-        ars: v.ars.toString(),
-        usd: v.usd.toString(),
+        ars: value.ars.toString(),
+        usd: value.usd.toString(),
       })),
     };
   });
@@ -287,7 +421,7 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
       orderBy: [{ dueDate: "asc" }, { transactionDate: "asc" }],
     });
 
-    // TODO: Phase 2 — expand recurring transactions into forecast window.
+    // TODO: Phase 2 - expand recurring transactions into forecast window.
     return {
       from: now.toISOString(),
       to: end.toISOString(),
