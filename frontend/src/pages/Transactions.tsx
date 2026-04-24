@@ -10,6 +10,10 @@ import {
   useDeleteTransaction,
   useTransactions,
 } from "../hooks/queries";
+import {
+  getPreferredAmountFromDual,
+  useCurrencyStore,
+} from "../lib/currency";
 import { fmtDate, fmtMoney } from "../lib/money";
 import type { Transaction } from "../lib/types";
 
@@ -56,6 +60,7 @@ export default function TransactionsPage() {
   const [listPreset, setListPreset] = useState<ListPreset>("month");
   const [formMode, setFormMode] = useState<FormMode>("quick");
   const [prefillNote, setPrefillNote] = useState<string | null>(null);
+  const { displayCurrency } = useCurrencyStore();
 
   const accountsQ = useAccounts();
   const categoriesQ = useCategories();
@@ -209,6 +214,7 @@ export default function TransactionsPage() {
     (category) => !filterType || category.type === filterType
   );
   const visibleTotals = summarizeVisibleTransactions(txItems);
+  const mirrorCurrency = displayCurrency === "ARS" ? "USD" : "ARS";
 
   return (
     <div className="space-y-6">
@@ -484,25 +490,47 @@ export default function TransactionsPage() {
             <SummaryCard
               label="Gastos visibles"
               tone="expense"
-              primary={fmtMoney(visibleTotals.expense.ars, "ARS")}
-              secondary={fmtMoney(visibleTotals.expense.usd, "USD")}
+              primary={fmtMoney(
+                getPreferredAmountFromDual(visibleTotals.expense, displayCurrency),
+                displayCurrency
+              )}
+              secondary={fmtMoney(
+                getPreferredAmountFromDual(visibleTotals.expense, mirrorCurrency),
+                mirrorCurrency
+              )}
             />
             <SummaryCard
               label="Ingresos visibles"
               tone="income"
-              primary={fmtMoney(visibleTotals.income.ars, "ARS")}
-              secondary={fmtMoney(visibleTotals.income.usd, "USD")}
+              primary={fmtMoney(
+                getPreferredAmountFromDual(visibleTotals.income, displayCurrency),
+                displayCurrency
+              )}
+              secondary={fmtMoney(
+                getPreferredAmountFromDual(visibleTotals.income, mirrorCurrency),
+                mirrorCurrency
+              )}
             />
             <SummaryCard
               label="Neto visible"
-              tone={visibleTotals.net.ars.startsWith("-") ? "expense" : "income"}
-              primary={fmtMoney(visibleTotals.net.ars, "ARS")}
-              secondary={fmtMoney(visibleTotals.net.usd, "USD")}
+              tone={
+                getPreferredAmountFromDual(visibleTotals.net, displayCurrency).startsWith("-")
+                  ? "expense"
+                  : "income"
+              }
+              primary={fmtMoney(
+                getPreferredAmountFromDual(visibleTotals.net, displayCurrency),
+                displayCurrency
+              )}
+              secondary={fmtMoney(
+                getPreferredAmountFromDual(visibleTotals.net, mirrorCurrency),
+                mirrorCurrency
+              )}
             />
             <SummaryCard
               label="Movimientos"
               primary={String(visibleTotals.count)}
-              secondary="segun filtros activos"
+              secondary={`vista en ${displayCurrency}`}
             />
           </div>
 
@@ -513,7 +541,7 @@ export default function TransactionsPage() {
                 <th className="px-3 py-2">Descripcion</th>
                 <th className="px-3 py-2">Categoria</th>
                 <th className="px-3 py-2">Cuenta</th>
-                <th className="px-3 py-2 text-right">Monto</th>
+                <th className="px-3 py-2 text-right">Monto ({displayCurrency})</th>
                 <th className="px-3 py-2">Estado</th>
                 <th />
               </tr>
@@ -528,8 +556,10 @@ export default function TransactionsPage() {
                     : transaction.type === "income"
                       ? "+"
                       : "";
-                const displayAmount =
-                  transaction.currency === "ARS" ? transaction.amountArs : transaction.amountUsd;
+                const displayAmount = getPreferredAmountFromDual(
+                  { ars: transaction.amountArs, usd: transaction.amountUsd },
+                  displayCurrency
+                );
 
                 return (
                   <tr
@@ -573,7 +603,7 @@ export default function TransactionsPage() {
                       }
                     >
                       {sign}
-                      {fmtMoney(displayAmount, transaction.currency)}
+                      {fmtMoney(displayAmount, displayCurrency)}
                     </td>
                     <td className="px-3 py-2">
                       {account?.type === "credit_card" ? (

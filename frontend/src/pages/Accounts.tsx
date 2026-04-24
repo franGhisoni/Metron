@@ -8,7 +8,9 @@ import {
   useCreditCardStatus,
   useDeleteAccount,
   usePayCreditCard,
+  useRates,
 } from "../hooks/queries";
+import { convertStoredAmount, useCurrencyStore } from "../lib/currency";
 import { fmtDate, fmtMoney } from "../lib/money";
 import type { Account } from "../lib/types";
 
@@ -50,9 +52,11 @@ type FormIn = z.infer<typeof FormSchema>;
 
 export default function AccountsPage() {
   const accountsQ = useAccounts();
+  const ratesQ = useRates();
   const createAcc = useCreateAccount();
   const delAcc = useDeleteAccount();
   const [showForm, setShowForm] = useState(false);
+  const { displayCurrency } = useCurrencyStore();
 
   const {
     register,
@@ -157,6 +161,8 @@ export default function AccountsPage() {
             key={a.id}
             account={a}
             allAccounts={accountsQ.data ?? []}
+            blueRate={ratesQ.data?.rates.blue ?? null}
+            displayCurrency={displayCurrency}
             onDelete={() => void delAcc.mutate(a.id)}
           />
         ))}
@@ -173,14 +179,24 @@ export default function AccountsPage() {
 const AccountCard = ({
   account,
   allAccounts,
+  blueRate,
+  displayCurrency,
   onDelete,
 }: {
   account: Account;
   allAccounts: Account[];
+  blueRate: string | null;
+  displayCurrency: "ARS" | "USD";
   onDelete: () => void;
 }) => {
   const ccQ = useCreditCardStatus(account.type === "credit_card" ? account.id : null);
   const [payOpen, setPayOpen] = useState(false);
+  const canConvert = !!blueRate;
+  const displayBalance =
+    canConvert && blueRate
+      ? convertStoredAmount(account.balance, account.currency, displayCurrency, blueRate)
+      : account.balance;
+  const showingConverted = displayCurrency !== account.currency && canConvert;
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
       <div className="flex items-start justify-between">
@@ -193,8 +209,13 @@ const AccountCard = ({
         </button>
       </div>
       <div className="mt-3 text-2xl font-semibold">
-        {fmtMoney(account.balance, account.currency)}
+        {fmtMoney(displayBalance, showingConverted ? displayCurrency : account.currency)}
       </div>
+      {showingConverted && (
+        <div className="mt-1 text-xs text-slate-500">
+          Original: {fmtMoney(account.balance, account.currency)}
+        </div>
+      )}
       {account.type === "credit_card" && (
         <div className="mt-4 space-y-1 rounded-md bg-slate-950/60 p-3 text-xs text-slate-300">
           {ccQ.data ? (

@@ -1,4 +1,5 @@
 export type Currency = "ARS" | "USD";
+export type DualAmount = { ars: string; usd: string };
 
 export type AccountType =
   | "checking"
@@ -64,11 +65,11 @@ export type Rates = { blue: string; oficial: string; mep: string };
 export type MonthlySummary = {
   year: number;
   month: number;
-  income: { ars: string; usd: string };
-  expense: { ars: string; usd: string };
-  net: { ars: string; usd: string };
+  income: DualAmount;
+  expense: DualAmount;
+  net: DualAmount;
   savingsRate: number | null;
-  byCategory: Array<{ categoryId: string | null; ars: string; usd: string }>;
+  byCategory: Array<{ categoryId: string | null } & DualAmount>;
 };
 
 export type CreditCardStatus = {
@@ -85,4 +86,29 @@ export type CreditCardStatus = {
   currentStatement: { ars: string; usd: string };
   nextStatement: { ars: string; usd: string };
   utilization: number | null;
+};
+
+export type MonthlySeriesPoint = {
+  year: number;
+  month: number;
+  label: string;
+  monthStart: string;
+  income: DualAmount;
+  expense: DualAmount;
+  net: DualAmount;
+};
+
+export type NetWorthHistoryPoint = {
+  year: number;
+  month: number;
+  label: string;
+  snapshotDate: string;
+  exchangeRate: string;
+  netWorth: DualAmount;
+};
+
+export type CashflowForecast = {
+  from: string;
+  to: string;
+  items: Transaction[];
 };

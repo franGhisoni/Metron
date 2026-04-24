@@ -5,6 +5,7 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import LoginPage from "./pages/Login";
 import RegisterPage from "./pages/Register";
 import DashboardPage from "./pages/Dashboard";
+import ReportsPage from "./pages/Reports";
 import TransactionsPage from "./pages/Transactions";
 import AccountsPage from "./pages/Accounts";
 import SettingsPage from "./pages/Settings";
@@ -12,10 +13,9 @@ import SettingsPage from "./pages/Settings";
 export default function App() {
   const { loading } = useAuth();
   if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center text-slate-400">Cargando…</div>
-    );
+    return <div className="flex h-full items-center justify-center text-slate-400">Cargando...</div>;
   }
+
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
@@ -23,10 +23,11 @@ export default function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<Layout />}>
           <Route path="/" element={<DashboardPage />} />
+          <Route path="/reports" element={<ReportsPage />} />
           <Route path="/transactions" element={<TransactionsPage />} />
           <Route path="/accounts" element={<AccountsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
-          {/* TODO: Phase 3 — /goals, /simulators, /reports, /investments */}
+          {/* TODO: Phase 3 - /goals, /simulators, /investments */}
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

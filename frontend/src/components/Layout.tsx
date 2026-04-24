@@ -1,9 +1,11 @@
 import { NavLink, Outlet } from "react-router-dom";
 import clsx from "clsx";
 import { useAuth } from "../lib/auth";
+import { useCurrencyStore } from "../lib/currency";
 
 const NAV = [
   { to: "/", label: "Panel" },
+  { to: "/reports", label: "Reportes" },
   { to: "/transactions", label: "Movimientos" },
   { to: "/accounts", label: "Cuentas" },
   { to: "/settings", label: "Ajustes" },
@@ -11,6 +13,8 @@ const NAV = [
 
 export const Layout = () => {
   const { user, logout } = useAuth();
+  const { displayCurrency, setDisplayCurrency } = useCurrencyStore();
+
   return (
     <div className="flex min-h-full flex-col">
       <header className="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/90 backdrop-blur">
@@ -36,6 +40,18 @@ export const Layout = () => {
             </nav>
           </div>
           <div className="flex items-center gap-3 text-sm">
+            <div className="hidden items-center gap-1 rounded-lg border border-slate-700 bg-slate-900 p-1 sm:inline-flex">
+              <CurrencyToggle
+                active={displayCurrency === "ARS"}
+                label="ARS"
+                onClick={() => setDisplayCurrency("ARS")}
+              />
+              <CurrencyToggle
+                active={displayCurrency === "USD"}
+                label="USD"
+                onClick={() => setDisplayCurrency("USD")}
+              />
+            </div>
             <span className="hidden text-slate-500 sm:inline">{user?.email}</span>
             <button
               onClick={() => void logout()}
@@ -43,6 +59,20 @@ export const Layout = () => {
             >
               Salir
             </button>
+          </div>
+        </div>
+        <div className="border-t border-slate-800 px-2 py-2 sm:hidden">
+          <div className="inline-flex rounded-lg border border-slate-700 bg-slate-900 p-1">
+            <CurrencyToggle
+              active={displayCurrency === "ARS"}
+              label="ARS"
+              onClick={() => setDisplayCurrency("ARS")}
+            />
+            <CurrencyToggle
+              active={displayCurrency === "USD"}
+              label="USD"
+              onClick={() => setDisplayCurrency("USD")}
+            />
           </div>
         </div>
         <nav className="flex gap-1 overflow-x-auto border-t border-slate-800 px-2 py-1 sm:hidden">
@@ -69,3 +99,24 @@ export const Layout = () => {
     </div>
   );
 };
+
+const CurrencyToggle = ({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={clsx(
+      "rounded-md px-2.5 py-1 text-xs transition",
+      active ? "bg-brand-600 text-white" : "text-slate-300 hover:bg-slate-800"
+    )}
+  >
+    {label}
+  </button>
+);

@@ -17,6 +17,7 @@ import accountRoutes from "./modules/accounts/routes.js";
 import transactionRoutes from "./modules/transactions/routes.js";
 import categoryRoutes from "./modules/categories/routes.js";
 import rateRoutes from "./modules/rates/routes.js";
+import reportRoutes from "./modules/reports/routes.js";
 import whatsappRoutes from "./modules/webhooks/whatsapp.js";
 import { startRateFetchJob } from "./modules/rates/job.js";
 import { startRecurringJob } from "./modules/transactions/recurringJob.js";
@@ -58,6 +59,7 @@ const buildServer = async () => {
   await app.register(transactionRoutes, { prefix: "/api/transactions" });
   await app.register(categoryRoutes, { prefix: "/api/categories" });
   await app.register(rateRoutes, { prefix: "/api/rates" });
+  await app.register(reportRoutes, { prefix: "/api/reports" });
   await app.register(whatsappRoutes, { prefix: "/api/webhooks" });
 
   return app;
