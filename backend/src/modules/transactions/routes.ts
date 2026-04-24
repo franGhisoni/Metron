@@ -23,8 +23,23 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
     const where: Prisma.TransactionWhereInput = {
       userId: req.userId,
       ...(q.accountId ? { accountId: q.accountId } : {}),
-      ...(q.categoryId ? { categoryId: q.categoryId } : {}),
-      ...(q.type ? { type: q.type } : {}),
+      ...(q.categoryIds?.length
+        ? { categoryId: { in: q.categoryIds } }
+        : q.categoryId
+          ? { categoryId: q.categoryId }
+          : {}),
+      ...(q.types?.length ? { type: { in: q.types } } : q.type ? { type: q.type } : {}),
+      ...(q.groupIds?.length
+        ? {
+            groupLinks: {
+              some: {
+                groupId: {
+                  in: q.groupIds,
+                },
+              },
+            },
+          }
+        : {}),
       ...(q.status ? { status: q.status } : {}),
       ...(q.from || q.to
         ? {
@@ -38,6 +53,13 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
 
     const rows = await app.prisma.transaction.findMany({
       where,
+      include: {
+        groupLinks: {
+          select: {
+            groupId: true,
+          },
+        },
+      },
       orderBy: [{ transactionDate: "desc" }, { id: "desc" }],
       take: q.limit + 1,
       ...(q.cursor ? { skip: 1, cursor: { id: q.cursor } } : {}),
@@ -53,6 +75,7 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/", async (req, reply) => {
     const body = CreateTransactionBody.parse(req.body);
+    const groupIds = dedupeIds(body.groupIds);
 
     const account = await assertAccountOwned(app.prisma, body.accountId, req.userId);
     if (!account) return reply.code(404).send({ error: "account_not_found" });
@@ -62,6 +85,19 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
         where: { id: body.categoryId, userId: req.userId },
       });
       if (!cat) return reply.code(404).send({ error: "category_not_found" });
+    }
+
+    if (groupIds.length) {
+      const groups = await app.prisma.transactionGroup.findMany({
+        where: {
+          userId: req.userId,
+          id: { in: groupIds },
+        },
+        select: { id: true },
+      });
+      if (groups.length !== groupIds.length) {
+        return reply.code(404).send({ error: "group_not_found" });
+      }
     }
 
     const rate = body.exchangeRate ?? (await getCurrentRate(app.prisma, app.redis, "blue"));
@@ -106,8 +142,26 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
         },
       });
 
+      if (groupIds.length) {
+        await tx.transactionGroupAssignment.createMany({
+          data: groupIds.map((groupId) => ({
+            transactionId: row.id,
+            groupId,
+          })),
+        });
+      }
+
       await applyBalanceDelta(tx, account.id, balanceDelta);
-      return row;
+      return tx.transaction.findUniqueOrThrow({
+        where: { id: row.id },
+        include: {
+          groupLinks: {
+            select: {
+              groupId: true,
+            },
+          },
+        },
+      });
     });
 
     return reply.code(201).send(serializeTransaction(created));
@@ -123,6 +177,11 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
         account: {
           select: { id: true, type: true, currency: true },
         },
+        groupLinks: {
+          select: {
+            groupId: true,
+          },
+        },
       },
     });
     if (!existing) return reply.code(404).send({ error: "not_found" });
@@ -132,6 +191,20 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
         where: { id: body.categoryId, userId: req.userId },
       });
       if (!cat) return reply.code(404).send({ error: "category_not_found" });
+    }
+
+    const nextGroupIds = body.groupIds !== undefined ? dedupeIds(body.groupIds) : undefined;
+    if (nextGroupIds?.length) {
+      const groups = await app.prisma.transactionGroup.findMany({
+        where: {
+          userId: req.userId,
+          id: { in: nextGroupIds },
+        },
+        select: { id: true },
+      });
+      if (groups.length !== nextGroupIds.length) {
+        return reply.code(404).send({ error: "group_not_found" });
+      }
     }
 
     const targetAccount =
@@ -246,8 +319,26 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
         },
       });
 
+      let groupLinks = existing.groupLinks;
+      if (nextGroupIds !== undefined) {
+        await tx.transactionGroupAssignment.deleteMany({
+          where: { transactionId: id },
+        });
+
+        if (nextGroupIds.length) {
+          await tx.transactionGroupAssignment.createMany({
+            data: nextGroupIds.map((groupId) => ({
+              transactionId: id,
+              groupId,
+            })),
+          });
+        }
+
+        groupLinks = nextGroupIds.map((groupId) => ({ groupId }));
+      }
+
       await applyBalanceDelta(tx, targetAccount.id, nextDelta);
-      return row;
+      return { ...row, groupLinks };
     });
 
     return reply.send(serializeTransaction(updated));
@@ -372,6 +463,13 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
           { dueDate: null, transactionDate: { gte: now, lte: end } },
         ],
       },
+      include: {
+        groupLinks: {
+          select: {
+            groupId: true,
+          },
+        },
+      },
       orderBy: [{ dueDate: "asc" }, { transactionDate: "asc" }],
     });
 
@@ -385,3 +483,7 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
 };
 
 export default transactionRoutes;
+
+function dedupeIds(ids: string[] | undefined) {
+  return [...new Set((ids ?? []).filter(Boolean))];
+}

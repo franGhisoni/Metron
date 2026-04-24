@@ -1,10 +1,15 @@
-import type { Transaction } from "@prisma/client";
+import type { Transaction, TransactionGroupAssignment } from "@prisma/client";
 import { ROUND_HALF_UP, serializeDecimal, toDecimal } from "../../lib/decimal.js";
 
-export const serializeTransaction = (t: Transaction) => ({
+type TransactionWithGroups = Transaction & {
+  groupLinks?: Pick<TransactionGroupAssignment, "groupId">[];
+};
+
+export const serializeTransaction = (t: TransactionWithGroups) => ({
   id: t.id,
   accountId: t.accountId,
   categoryId: t.categoryId,
+  groupIds: t.groupLinks?.map((link) => link.groupId) ?? [],
   type: t.type,
   amountArs: serializeDecimal(t.amountArs) ?? "0",
   amountUsd: serializeDecimal(t.amountUsd) ?? "0",

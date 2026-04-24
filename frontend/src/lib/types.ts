@@ -31,6 +31,7 @@ export type Transaction = {
   id: string;
   accountId: string;
   categoryId: string | null;
+  groupIds: string[];
   type: TxType;
   amountArs: string;
   amountUsd: string;
@@ -58,6 +59,15 @@ export type Category = {
   color: string;
   icon: string;
   parentId: string | null;
+};
+
+export type TransactionGroup = {
+  id: string;
+  userId: string;
+  name: string;
+  color: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type Rates = { blue: string; oficial: string; mep: string };

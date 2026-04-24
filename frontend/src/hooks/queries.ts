@@ -10,6 +10,7 @@ import type {
   NetWorthHistoryPoint,
   Rates,
   Transaction,
+  TransactionGroup,
 } from "../lib/types";
 
 export const useAccounts = () =>
@@ -24,6 +25,12 @@ export const useCategories = () =>
     queryFn: async () => (await api.get<Category[]>("/api/categories")).data,
   });
 
+export const useGroups = () =>
+  useQuery({
+    queryKey: ["groups"],
+    queryFn: async () => (await api.get<TransactionGroup[]>("/api/groups")).data,
+  });
+
 export const useRates = () =>
   useQuery({
     queryKey: ["rates", "current"],
@@ -35,7 +42,10 @@ export const useRates = () =>
 export const useTransactions = (params: {
   accountId?: string;
   categoryId?: string;
+  categoryIds?: string[];
+  groupIds?: string[];
   type?: "income" | "expense" | "transfer";
+  types?: Array<"income" | "expense" | "transfer">;
   status?: "paid" | "pending" | "scheduled";
   from?: string;
   to?: string;
@@ -126,6 +136,22 @@ export const useDeleteTransaction = () => {
       void qc.invalidateQueries({ queryKey: ["transactions"] });
       void qc.invalidateQueries({ queryKey: ["accounts"] });
       void qc.invalidateQueries({ queryKey: ["summary"] });
+      void qc.invalidateQueries({ queryKey: ["creditCardStatus"] });
+      void qc.invalidateQueries({ queryKey: ["reports"] });
+    },
+  });
+};
+
+export const useUpdateTransaction = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...body }: { id: string } & Record<string, unknown>) =>
+      (await api.put<Transaction>(`/api/transactions/${id}`, body)).data,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["transactions"] });
+      void qc.invalidateQueries({ queryKey: ["accounts"] });
+      void qc.invalidateQueries({ queryKey: ["summary"] });
+      void qc.invalidateQueries({ queryKey: ["creditCardStatus"] });
       void qc.invalidateQueries({ queryKey: ["reports"] });
     },
   });
@@ -161,6 +187,42 @@ export const useDeleteCategory = () => {
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["categories"] });
+      void qc.invalidateQueries({ queryKey: ["transactions"] });
+    },
+  });
+};
+
+export const useCreateGroup = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: Record<string, unknown>) =>
+      (await api.post<TransactionGroup>("/api/groups", body)).data,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["groups"] });
+    },
+  });
+};
+
+export const useUpdateGroup = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...body }: { id: string } & Record<string, unknown>) =>
+      (await api.put<TransactionGroup>(`/api/groups/${id}`, body)).data,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["groups"] });
+      void qc.invalidateQueries({ queryKey: ["transactions"] });
+    },
+  });
+};
+
+export const useDeleteGroup = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/api/groups/${id}`);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["groups"] });
       void qc.invalidateQueries({ queryKey: ["transactions"] });
     },
   });

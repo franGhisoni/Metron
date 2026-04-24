@@ -44,6 +44,7 @@ model User {
   accounts         Account[]
   transactions     Transaction[]
   categories       Category[]
+  transactionGroups TransactionGroup[]
   investments      Investment[]
   goals            SavingsGoal[]
   monthlySummaries MonthlySummary[]
@@ -112,6 +113,7 @@ model Transaction {
   recurringChildren Transaction[] @relation("RecurringChildren")
   linkedTransaction Transaction?  @relation("LinkedTransfers", fields: [linkedTransactionId], references: [id], onDelete: SetNull)
   linkedBy         Transaction[] @relation("LinkedTransfers")
+  groupLinks       TransactionGroupAssignment[]
 
   @@index([userId, transactionDate])
   @@index([accountId])
@@ -135,6 +137,33 @@ model Category {
 
   @@index([userId])
   @@index([parentId])
+}
+
+model TransactionGroup {
+  id               String   @id @default(cuid())
+  userId           String
+  name             String
+  color            String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user             User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactionLinks TransactionGroupAssignment[]
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+model TransactionGroupAssignment {
+  transactionId String
+  groupId       String
+  createdAt     DateTime @default(now())
+
+  transaction Transaction      @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  group       TransactionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([transactionId, groupId])
+  @@index([groupId])
 }
 
 model Investment {

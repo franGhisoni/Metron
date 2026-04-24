@@ -1,4 +1,5 @@
 import CategoriesManager from "../components/CategoriesManager";
+import GroupsManager from "../components/GroupsManager";
 import { useAuth } from "../lib/auth";
 
 // TODO: Phase 1b - wire /api/users/me PATCH endpoint + form to edit
@@ -11,7 +12,7 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-2xl font-semibold">Ajustes</h1>
         <p className="mt-1 text-sm text-slate-400">
-          Configura tu perfil y manten ordenadas las categorias que usas para registrar
+          Configura tu perfil y manten ordenadas las categorias y grupos que usas para registrar
           movimientos.
         </p>
       </div>
@@ -29,6 +30,7 @@ export default function SettingsPage() {
       </div>
 
       <CategoriesManager />
+      <GroupsManager />
     </div>
   );
 }
