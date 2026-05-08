@@ -86,7 +86,7 @@ export const ListTransactionsQuery = z.object({
   type: z.enum(TX_TYPES).optional(),
   types: QueryTxTypeList,
   status: z.enum(TX_STATUSES).optional(),
-  limit: z.coerce.number().int().positive().max(200).default(50),
+  limit: z.coerce.number().int().positive().max(1000).default(50),
   cursor: z.string().optional(), // last tx id from previous page
 });
 export type ListTransactionsQuery = z.infer<typeof ListTransactionsQuery>;

@@ -28,8 +28,15 @@ type AuthState = {
 
 const AuthContext = createContext<AuthState | null>(null);
 
+const SESSION_FLAG = "metron:has-session";
+export const markSessionActive = () => localStorage.setItem(SESSION_FLAG, "1");
+export const clearSessionFlag = () => localStorage.removeItem(SESSION_FLAG);
+export const hasSessionFlag = () => localStorage.getItem(SESSION_FLAG) === "1";
+
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
+  // Always start loading=true so ProtectedRoute waits for bootstrap before redirecting.
+  // The session flag is just used to avoid flashing the login page on hard reload.
   const [loading, setLoading] = useState(true);
   const didBootstrap = useRef(false);
 
@@ -73,6 +80,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     });
     setAccessToken(res.data.accessToken);
     setUser(res.data.user);
+    markSessionActive();
   }, []);
 
   const register = useCallback(
@@ -84,6 +92,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       });
       setAccessToken(res.data.accessToken);
       setUser(res.data.user);
+      markSessionActive();
     },
     []
   );
@@ -92,6 +101,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       await api.post("/api/auth/logout");
     } finally {
+      clearSessionFlag();
       clearAuth();
     }
   }, [clearAuth]);

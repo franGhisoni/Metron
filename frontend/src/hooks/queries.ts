@@ -39,7 +39,7 @@ export const useRates = () =>
     staleTime: 60_000,
   });
 
-export const useTransactions = (params: {
+type TransactionParams = {
   accountId?: string;
   categoryId?: string;
   categoryIds?: string[];
@@ -51,17 +51,38 @@ export const useTransactions = (params: {
   to?: string;
   limit?: number;
   cursor?: string;
-}) =>
-  useQuery({
+};
+
+// Build query string manually so arrays use repeated keys (types=a&types=b)
+// instead of axios's default bracket notation (types[]=a) which Fastify ignores.
+function buildTxQS(p: TransactionParams): string {
+  const usp = new URLSearchParams();
+  if (p.from) usp.set("from", p.from);
+  if (p.to) usp.set("to", p.to);
+  if (p.limit !== undefined) usp.set("limit", String(p.limit));
+  if (p.accountId) usp.set("accountId", p.accountId);
+  if (p.categoryId) usp.set("categoryId", p.categoryId);
+  if (p.type) usp.set("type", p.type);
+  if (p.status) usp.set("status", p.status);
+  if (p.cursor) usp.set("cursor", p.cursor);
+  p.types?.forEach((t) => usp.append("types", t));
+  p.categoryIds?.forEach((c) => usp.append("categoryIds", c));
+  p.groupIds?.forEach((g) => usp.append("groupIds", g));
+  return usp.toString();
+}
+
+export const useTransactions = (params: TransactionParams) => {
+  const qs = buildTxQS(params);
+  return useQuery({
     queryKey: ["transactions", params],
     queryFn: async () =>
       (
         await api.get<{ items: Transaction[]; nextCursor: string | null }>(
-          "/api/transactions",
-          { params }
+          `/api/transactions${qs ? `?${qs}` : ""}`
         )
       ).data,
   });
+};
 
 export const useMonthlySummary = (year: number, month: number) =>
   useQuery({

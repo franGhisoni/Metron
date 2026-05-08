@@ -32,7 +32,7 @@ const FormSchema = z.object({
 
 type FormIn = z.infer<typeof FormSchema>;
 type FormMode = "quick" | "normal";
-type ListPreset = "month" | "recent" | "all";
+type ListPreset = "month" | "all";
 type TxFilterType = "income" | "expense" | "transfer";
 type StoredQuickDraft = Pick<
   FormIn,
@@ -40,7 +40,6 @@ type StoredQuickDraft = Pick<
 >;
 
 const QUICK_DRAFT_KEY = "metron:transactions:quick-draft";
-const RECENT_LIMIT = 20;
 const TX_FILTER_OPTIONS: Array<{ value: TxFilterType; label: string }> = [
   { value: "expense", label: "Gastos" },
   { value: "income", label: "Ingresos" },
@@ -68,6 +67,11 @@ export default function TransactionsPage() {
   const [filterCategoryIds, setFilterCategoryIds] = useState<string[]>([]);
   const [filterGroupIds, setFilterGroupIds] = useState<string[]>([]);
   const [listPreset, setListPreset] = useState<ListPreset>("month");
+  // selectedMonth: { year, month (1-based) } — only used when listPreset === "month"
+  const [selectedMonth, setSelectedMonth] = useState<{ year: number; month: number }>(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() + 1 };
+  });
   const [formMode, setFormMode] = useState<FormMode>("quick");
   const [prefillNote, setPrefillNote] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -78,7 +82,7 @@ export default function TransactionsPage() {
   const categoriesQ = useCategories();
   const groupsQ = useGroups();
   const txQ = useTransactions(
-    buildTransactionParams(listPreset, filterTypes, filterCategoryIds, filterGroupIds)
+    buildTransactionParams(listPreset, selectedMonth, filterTypes, filterCategoryIds, filterGroupIds)
   );
   const createTx = useCreateTransaction();
   const updateTx = useUpdateTransaction();
@@ -546,22 +550,26 @@ export default function TransactionsPage() {
 
             <div>
               <div className="mb-1 text-xs uppercase tracking-wide text-slate-500">Rango</div>
-              <div className="inline-flex rounded-lg border border-slate-700 bg-slate-950/60 p-1">
-                <ModeButton
-                  active={listPreset === "month"}
-                  onClick={() => setListPreset("month")}
-                  label="Este mes"
-                />
-                <ModeButton
-                  active={listPreset === "recent"}
-                  onClick={() => setListPreset("recent")}
-                  label="Ultimos"
-                />
-                <ModeButton
-                  active={listPreset === "all"}
-                  onClick={() => setListPreset("all")}
-                  label="Todos"
-                />
+              <div className="flex items-center gap-2">
+                <div className="inline-flex rounded-lg border border-slate-700 bg-slate-950/60 p-1">
+                  <ModeButton
+                    active={listPreset === "month"}
+                    onClick={() => setListPreset("month")}
+                    label="Por mes"
+                  />
+                  <ModeButton
+                    active={listPreset === "all"}
+                    onClick={() => setListPreset("all")}
+                    label="Todos"
+                  />
+                </div>
+                {listPreset === "month" && (
+                  <MonthNavigator
+                    year={selectedMonth.year}
+                    month={selectedMonth.month}
+                    onChange={setSelectedMonth}
+                  />
+                )}
               </div>
             </div>
           </div>
@@ -1051,6 +1059,7 @@ const Field = ({
 
 function buildTransactionParams(
   listPreset: ListPreset,
+  selectedMonth: { year: number; month: number },
   filterTypes: TxFilterType[],
   categoryIds: string[],
   groupIds: string[]
@@ -1064,32 +1073,20 @@ function buildTransactionParams(
     limit?: number;
   } = {};
 
-  if (filterTypes.length) {
-    params.types = filterTypes;
-  }
-
-  if (categoryIds.length) {
-    params.categoryIds = categoryIds;
-  }
-
-  if (groupIds.length) {
-    params.groupIds = groupIds;
-  }
-
-  if (listPreset === "recent") {
-    params.limit = RECENT_LIMIT;
-    return params;
-  }
+  if (filterTypes.length) params.types = filterTypes;
+  if (categoryIds.length) params.categoryIds = categoryIds;
+  if (groupIds.length) params.groupIds = groupIds;
 
   if (listPreset === "month") {
-    const now = new Date();
-    params.from = startOfMonth(now).toISOString();
-    params.to = endOfMonth(now).toISOString();
-    params.limit = 200;
+    const from = new Date(selectedMonth.year, selectedMonth.month - 1, 1, 0, 0, 0, 0);
+    const to = new Date(selectedMonth.year, selectedMonth.month, 0, 23, 59, 59, 999);
+    params.from = from.toISOString();
+    params.to = to.toISOString();
+    params.limit = 300;
     return params;
   }
 
-  params.limit = 200;
+  params.limit = 500;
   return params;
 }
 
@@ -1132,12 +1129,57 @@ function summarizeVisibleTransactions(transactions: Transaction[]) {
   };
 }
 
-function startOfMonth(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
-}
+const MONTH_NAMES = [
+  "Enero","Febrero","Marzo","Abril","Mayo","Junio",
+  "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre",
+];
 
-function endOfMonth(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
+function MonthNavigator({
+  year,
+  month,
+  onChange,
+}: {
+  year: number;
+  month: number;
+  onChange: (v: { year: number; month: number }) => void;
+}) {
+  const now = new Date();
+  const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1;
+
+  const prev = () => {
+    if (month === 1) onChange({ year: year - 1, month: 12 });
+    else onChange({ year, month: month - 1 });
+  };
+  const next = () => {
+    if (isCurrentMonth) return;
+    if (month === 12) onChange({ year: year + 1, month: 1 });
+    else onChange({ year, month: month + 1 });
+  };
+
+  return (
+    <div className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-950/60 px-2 py-1">
+      <button
+        type="button"
+        onClick={prev}
+        className="rounded px-1.5 py-0.5 text-slate-400 hover:bg-slate-800 hover:text-white"
+        title="Mes anterior"
+      >
+        ←
+      </button>
+      <span className="min-w-[120px] text-center text-sm font-medium text-slate-200">
+        {MONTH_NAMES[month - 1]} {year}
+      </span>
+      <button
+        type="button"
+        onClick={next}
+        disabled={isCurrentMonth}
+        className="rounded px-1.5 py-0.5 text-slate-400 hover:bg-slate-800 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+        title="Mes siguiente"
+      >
+        →
+      </button>
+    </div>
+  );
 }
 
 function loadStoredQuickDraft(): StoredQuickDraft | null {
