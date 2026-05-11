@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { api, refreshAccessToken, setAccessToken, setOnUnauthorized } from "./api";
+import { api, doRefresh, setAccessToken, setOnUnauthorized } from "./api";
 
 export type User = {
   id: string;
@@ -28,15 +28,19 @@ type AuthState = {
 
 const AuthContext = createContext<AuthState | null>(null);
 
+// Module-level guard: prevents React 18 StrictMode's double-mount from firing two
+// concurrent refresh requests with the same cookie. Both requests would carry the
+// same (not-yet-rotated) token; whichever arrived second would see the token already
+// revoked, trigger revokeAllUserRefreshTokens, and lock the user out on every load.
+let _bootstrapped = false;
+
 const SESSION_FLAG = "metron:has-session";
 export const markSessionActive = () => localStorage.setItem(SESSION_FLAG, "1");
 export const clearSessionFlag = () => localStorage.removeItem(SESSION_FLAG);
-export const hasSessionFlag = () => localStorage.getItem(SESSION_FLAG) === "1";
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   // Always start loading=true so ProtectedRoute waits for bootstrap before redirecting.
-  // The session flag is just used to avoid flashing the login page on hard reload.
   const [loading, setLoading] = useState(true);
   const didBootstrap = useRef(false);
 
@@ -45,14 +49,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setUser(null);
   }, []);
 
+  // refresh() calls /api/auth/refresh and uses the returned user directly —
+  // no extra /api/auth/me round-trip needed.
   const refresh = useCallback(async () => {
-    const token = await refreshAccessToken();
-    if (!token) {
+    const data = await doRefresh();
+    if (!data) {
       clearAuth();
       return;
     }
-    const me = await api.get<User>("/api/auth/me");
-    setUser(me.data);
+    setUser(data.user as User);
   }, [clearAuth]);
 
   useEffect(() => {
@@ -62,7 +67,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [clearAuth]);
 
   useEffect(() => {
-    if (didBootstrap.current) return;
+    // Use the module-level flag (not a ref) so the StrictMode remount also sees it.
+    if (_bootstrapped || didBootstrap.current) return;
+    _bootstrapped = true;
     didBootstrap.current = true;
     (async () => {
       try {
@@ -98,6 +105,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   );
 
   const logout = useCallback(async () => {
+    _bootstrapped = false; // allow bootstrap to re-run after login
     try {
       await api.post("/api/auth/logout");
     } finally {

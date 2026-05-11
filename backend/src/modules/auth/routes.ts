@@ -6,7 +6,6 @@ import {
   hashPassword,
   persistRefreshToken,
   refreshCookieOptions,
-  revokeAllUserRefreshTokens,
   revokeRefreshToken,
   rotateRefreshToken,
   verifyPassword,
@@ -86,8 +85,8 @@ const authRoutes: FastifyPluginAsync = async (app) => {
 
     const rotated = await rotateRefreshToken(app.prisma, payload.jti, unsigned.value);
     if (!rotated) {
-      // Possible reuse attack — revoke all tokens for the user as a safety net.
-      await revokeAllUserRefreshTokens(app.prisma, payload.sub);
+      // Token was already rotated or expired (e.g. concurrent refresh race).
+      // Return 401 without revoking all tokens to avoid false-positive lockouts.
       return reply.code(401).send({ error: "invalid_refresh_token" });
     }
 

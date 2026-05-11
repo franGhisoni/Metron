@@ -47,15 +47,19 @@ export const rotateRefreshToken = async (
   incomingToken: string
 ) => {
   const tokenHash = hashRefreshToken(incomingToken);
-  const record = await prisma.refreshToken.findUnique({ where: { id: jti } });
-  if (!record || record.tokenHash !== tokenHash) return null;
-  if (record.revokedAt) return null;
-  if (record.expiresAt.getTime() < Date.now()) return null;
-  await prisma.refreshToken.update({
-    where: { id: jti },
+  // Atomic update: only revokes if the token is still valid (not yet rotated).
+  // Two concurrent requests with the same cookie both attempt this; the second
+  // will get count=0 and fail gracefully instead of triggering a revoke-all.
+  const result = await prisma.refreshToken.updateMany({
+    where: {
+      id: jti,
+      tokenHash,
+      revokedAt: null,
+      expiresAt: { gt: new Date() },
+    },
     data: { revokedAt: new Date() },
   });
-  return record;
+  return result.count > 0;
 };
 
 export const revokeAllUserRefreshTokens = async (prisma: PrismaClient, userId: string) => {

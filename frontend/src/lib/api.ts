@@ -8,7 +8,6 @@ export const api = axios.create({
 });
 
 let accessToken: string | null = null;
-let refreshPromise: Promise<string | null> | null = null;
 let onUnauthorized: (() => void) | null = null;
 
 export const setAccessToken = (token: string | null) => {
@@ -19,23 +18,31 @@ export const setOnUnauthorized = (cb: () => void) => {
   onUnauthorized = cb;
 };
 
-const refreshAccessToken = async (): Promise<string | null> => {
+// Shape returned by POST /api/auth/refresh
+export type RefreshResult = {
+  accessToken: string;
+  user: { id: string; email: string; phone: string | null; currencyPref: "ARS" | "USD" };
+};
+
+// Single in-flight promise so concurrent callers share one HTTP request
+let refreshPromise: Promise<RefreshResult | null> | null = null;
+
+export const doRefresh = async (): Promise<RefreshResult | null> => {
   if (!refreshPromise) {
     refreshPromise = (async () => {
       try {
-        const res = await axios.post(
+        const res = await axios.post<RefreshResult>(
           `${BASE_URL}/api/auth/refresh`,
           {},
           { withCredentials: true }
         );
-        const token = (res.data as { accessToken?: string }).accessToken ?? null;
-        accessToken = token;
-        return token;
+        accessToken = res.data.accessToken;
+        return res.data;
       } catch {
         accessToken = null;
         return null;
       } finally {
-        // small delay so concurrent requests can share the promise
+        // small delay so concurrent requests share the same promise
         setTimeout(() => {
           refreshPromise = null;
         }, 0);
@@ -43,6 +50,12 @@ const refreshAccessToken = async (): Promise<string | null> => {
     })();
   }
   return refreshPromise;
+};
+
+// Kept for the response interceptor — only needs the token
+const refreshAccessToken = async (): Promise<string | null> => {
+  const data = await doRefresh();
+  return data?.accessToken ?? null;
 };
 
 api.interceptors.request.use((config) => {
