@@ -10,9 +10,8 @@ import type {
   Transaction,
 } from "./types";
 
-const monthFormatter = new Intl.DateTimeFormat("es-AR", {
+const monthNameFormatter = new Intl.DateTimeFormat("es-AR", {
   month: "short",
-  year: "2-digit",
   timeZone: "UTC",
 });
 
@@ -40,8 +39,12 @@ export const parseMonthValue = (value: string) => {
 export const getPreviousMonth = (year: number, month: number) =>
   month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
 
-export const formatMonthLabel = (year: number, month: number) =>
-  monthFormatter.format(new Date(Date.UTC(year, month - 1, 1))).replace(".", "");
+export const formatMonthLabel = (year: number, month: number) => {
+  const d = new Date(Date.UTC(year, month - 1, 1));
+  const monthName = monthNameFormatter.format(d).replace(".", "");
+  const yearShort = String(year).slice(-2);
+  return `${monthName} '${yearShort}`;
+};
 
 export const formatShortDate = (iso: string) => shortDateFormatter.format(new Date(iso));
 
