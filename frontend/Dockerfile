@@ -4,10 +4,8 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml* ./
 RUN pnpm install --frozen-lockfile || pnpm install
 COPY . .
-# VITE_API_BASE_URL no longer needed — nginx proxies /api at runtime.
-# Keeping the ARG in case a future build needs it.
-ARG VITE_API_BASE_URL=""
-ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+# All API calls use relative paths — nginx proxies /api at runtime.
+# VITE_API_BASE_URL must NOT be set; it bypasses nginx and breaks cookies.
 RUN pnpm build
 
 FROM nginx:alpine AS runtime
