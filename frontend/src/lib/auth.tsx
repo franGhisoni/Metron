@@ -8,7 +8,16 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { api, doRefresh, setAccessToken, setOnUnauthorized } from "./api";
+import {
+  api,
+  doRefresh,
+  setAccessToken,
+  setOnUnauthorized,
+  persistSession,
+  clearPersistedSession,
+  loadPersistedSession,
+  type RefreshResult,
+} from "./api";
 
 export type User = {
   id: string;
@@ -29,14 +38,8 @@ type AuthState = {
 const AuthContext = createContext<AuthState | null>(null);
 
 // Module-level guard: prevents React 18 StrictMode's double-mount from firing two
-// concurrent refresh requests with the same cookie. Both requests would carry the
-// same (not-yet-rotated) token; whichever arrived second would see the token already
-// revoked, trigger revokeAllUserRefreshTokens, and lock the user out on every load.
+// concurrent refresh requests with the same cookie.
 let _bootstrapped = false;
-
-const SESSION_FLAG = "metron:has-session";
-export const markSessionActive = () => localStorage.setItem(SESSION_FLAG, "1");
-export const clearSessionFlag = () => localStorage.removeItem(SESSION_FLAG);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -47,10 +50,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const clearAuth = useCallback(() => {
     setAccessToken(null);
     setUser(null);
+    clearPersistedSession();
   }, []);
 
-  // refresh() calls /api/auth/refresh and uses the returned user directly —
-  // no extra /api/auth/me round-trip needed.
+  // refresh() calls /api/auth/refresh and uses the returned user directly.
   const refresh = useCallback(async () => {
     const data = await doRefresh();
     if (!data) {
@@ -71,7 +74,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (_bootstrapped || didBootstrap.current) return;
     _bootstrapped = true;
     didBootstrap.current = true;
+
     (async () => {
+      // ── Fast path: restore from localStorage ────────────────────────────
+      // No network request needed — the user sees their data instantly.
+      const stored = loadPersistedSession();
+      if (stored) {
+        setAccessToken(stored.accessToken);
+        setUser(stored.user as User);
+        setLoading(false);
+
+        // Background: rotate the httpOnly refresh cookie so the server-side
+        // session stays alive. If the cookie fails (or was never stored), the
+        // user stays logged in until the localStorage token expires (≤ 14 min),
+        // then the API interceptor will call clearAuth() on the next 401.
+        doRefresh().then((fresh) => {
+          if (fresh) setUser(fresh.user as User);
+        });
+        return;
+      }
+
+      // ── Slow path: no localStorage — try the httpOnly cookie ─────────────
       try {
         await refresh();
       } finally {
@@ -87,7 +110,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     });
     setAccessToken(res.data.accessToken);
     setUser(res.data.user);
-    markSessionActive();
+    persistSession(res.data as RefreshResult);
   }, []);
 
   const register = useCallback(
@@ -99,17 +122,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       });
       setAccessToken(res.data.accessToken);
       setUser(res.data.user);
-      markSessionActive();
+      persistSession(res.data as RefreshResult);
     },
     []
   );
 
   const logout = useCallback(async () => {
-    _bootstrapped = false; // allow bootstrap to re-run after login
+    _bootstrapped = false; // allow bootstrap to re-run after next login
     try {
       await api.post("/api/auth/logout");
     } finally {
-      clearSessionFlag();
       clearAuth();
     }
   }, [clearAuth]);

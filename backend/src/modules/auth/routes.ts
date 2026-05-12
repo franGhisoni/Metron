@@ -69,10 +69,14 @@ const authRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/refresh", async (req, reply) => {
     const raw = req.cookies[REFRESH_COOKIE];
-    if (!raw) return reply.code(401).send({ error: "missing_refresh_token" });
+    if (!raw) {
+      req.log.warn({ cookies: Object.keys(req.cookies) }, "refresh: cookie missing");
+      return reply.code(401).send({ error: "missing_refresh_token" });
+    }
 
     const unsigned = req.unsignCookie(raw);
     if (!unsigned.valid || unsigned.value === null) {
+      req.log.warn("refresh: cookie signature invalid");
       return reply.code(401).send({ error: "invalid_refresh_token" });
     }
 
@@ -80,6 +84,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
     try {
       payload = app.verifyRefreshToken(unsigned.value);
     } catch {
+      req.log.warn("refresh: JWT verification failed");
       return reply.code(401).send({ error: "invalid_refresh_token" });
     }
 
@@ -87,6 +92,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
     if (!rotated) {
       // Token was already rotated or expired (e.g. concurrent refresh race).
       // Return 401 without revoking all tokens to avoid false-positive lockouts.
+      req.log.warn({ jti: payload.jti }, "refresh: token already rotated or expired");
       return reply.code(401).send({ error: "invalid_refresh_token" });
     }
 
