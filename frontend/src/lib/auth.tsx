@@ -37,13 +37,12 @@ type AuthState = {
 
 const AuthContext = createContext<AuthState | null>(null);
 
-// Module-level guard: prevents React 18 StrictMode's double-mount from firing two
-// concurrent refresh requests with the same cookie.
+// Module-level guard: prevents React 18 StrictMode double-mount from firing
+// two concurrent refreshes.
 let _bootstrapped = false;
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
-  // Always start loading=true so ProtectedRoute waits for bootstrap before redirecting.
   const [loading, setLoading] = useState(true);
   const didBootstrap = useRef(false);
 
@@ -53,7 +52,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     clearPersistedSession();
   }, []);
 
-  // refresh() calls /api/auth/refresh and uses the returned user directly.
   const refresh = useCallback(async () => {
     const data = await doRefresh();
     if (!data) {
@@ -70,31 +68,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [clearAuth]);
 
   useEffect(() => {
-    // Use the module-level flag (not a ref) so the StrictMode remount also sees it.
     if (_bootstrapped || didBootstrap.current) return;
     _bootstrapped = true;
     didBootstrap.current = true;
 
     (async () => {
       // ── Fast path: restore from localStorage ────────────────────────────
-      // No network request needed — the user sees their data instantly.
       const stored = loadPersistedSession();
       if (stored) {
         setAccessToken(stored.accessToken);
         setUser(stored.user as User);
         setLoading(false);
 
-        // Background: rotate the httpOnly refresh cookie so the server-side
-        // session stays alive. If the cookie fails (or was never stored), the
-        // user stays logged in until the localStorage token expires (≤ 14 min),
-        // then the API interceptor will call clearAuth() on the next 401.
+        // Background-refresh to rotate the token. If it fails the user stays
+        // logged in until the stored access token expires, at which point the
+        // API interceptor will call clearAuth().
         doRefresh().then((fresh) => {
           if (fresh) setUser(fresh.user as User);
         });
         return;
       }
 
-      // ── Slow path: no localStorage — try the httpOnly cookie ─────────────
+      // ── Slow path: no localStorage — try cookie or re-login ─────────────
       try {
         await refresh();
       } finally {
@@ -104,33 +99,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [refresh]);
 
   const login = useCallback(async (email: string, password: string) => {
-    const res = await api.post<{ user: User; accessToken: string }>("/api/auth/login", {
-      email,
-      password,
-    });
+    const res = await api.post<RefreshResult>("/api/auth/login", { email, password });
     setAccessToken(res.data.accessToken);
-    setUser(res.data.user);
-    persistSession(res.data as RefreshResult);
+    setUser(res.data.user as User);
+    persistSession(res.data);
   }, []);
 
   const register = useCallback(
     async (email: string, password: string, phone?: string) => {
-      const res = await api.post<{ user: User; accessToken: string }>("/api/auth/register", {
+      const res = await api.post<RefreshResult>("/api/auth/register", {
         email,
         password,
         phone,
       });
       setAccessToken(res.data.accessToken);
-      setUser(res.data.user);
-      persistSession(res.data as RefreshResult);
+      setUser(res.data.user as User);
+      persistSession(res.data);
     },
     []
   );
 
   const logout = useCallback(async () => {
-    _bootstrapped = false; // allow bootstrap to re-run after next login
+    _bootstrapped = false;
+    const stored = loadPersistedSession();
     try {
-      await api.post("/api/auth/logout");
+      await api.post(
+        "/api/auth/logout",
+        stored?.refreshToken ? { refreshToken: stored.refreshToken } : {}
+      );
     } finally {
       clearAuth();
     }

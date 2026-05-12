@@ -18,22 +18,18 @@ export const setOnUnauthorized = (cb: () => void) => {
   onUnauthorized = cb;
 };
 
-// Shape returned by POST /api/auth/refresh and /api/auth/login
+// Shape returned by /login, /register, and /refresh
 export type RefreshResult = {
   accessToken: string;
+  refreshToken: string;
   user: { id: string; email: string; phone: string | null; currencyPref: "ARS" | "USD" };
 };
 
 // ── localStorage session persistence ────────────────────────────────────────
-// Stores the access token + user profile so new tabs can restore immediately
-// without waiting for the httpOnly-cookie round-trip to the backend.
-// TTL is set slightly below the JWT lifetime (15 min) so we never present an
-// already-expired token to the API on first use after restore.
-
 const SESSION_KEY = "metron:session";
 type StoredSession = RefreshResult & { expiresAt: number };
 
-export const persistSession = (data: RefreshResult, ttlMs = 14 * 60 * 1000) => {
+export const persistSession = (data: RefreshResult, ttlMs = 14 * 24 * 60 * 60 * 1000) => {
   try {
     const session: StoredSession = { ...data, expiresAt: Date.now() + ttlMs };
     localStorage.setItem(SESSION_KEY, JSON.stringify(session));
@@ -42,7 +38,7 @@ export const persistSession = (data: RefreshResult, ttlMs = 14 * 60 * 1000) => {
   }
 };
 
-export const loadPersistedSession = (): RefreshResult | null => {
+export const loadPersistedSession = (): (RefreshResult & { expiresAt: number }) | null => {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return null;
@@ -51,7 +47,7 @@ export const loadPersistedSession = (): RefreshResult | null => {
       localStorage.removeItem(SESSION_KEY);
       return null;
     }
-    return { accessToken: session.accessToken, user: session.user };
+    return session;
   } catch {
     return null;
   }
@@ -72,10 +68,15 @@ let refreshPromise: Promise<RefreshResult | null> | null = null;
 export const doRefresh = async (): Promise<RefreshResult | null> => {
   if (!refreshPromise) {
     refreshPromise = (async () => {
+      // Prefer the refresh token stored in localStorage (works regardless of
+      // cookie configuration). Fall back to httpOnly cookie if not available.
+      const stored = loadPersistedSession();
+      const body = stored?.refreshToken ? { refreshToken: stored.refreshToken } : {};
+
       try {
         const res = await axios.post<RefreshResult>(
           `${BASE_URL}/api/auth/refresh`,
-          {},
+          body,
           { withCredentials: true }
         );
         accessToken = res.data.accessToken;
@@ -95,7 +96,6 @@ export const doRefresh = async (): Promise<RefreshResult | null> => {
         }
         return null;
       } finally {
-        // Small delay so concurrent requests share the same promise.
         setTimeout(() => {
           refreshPromise = null;
         }, 0);

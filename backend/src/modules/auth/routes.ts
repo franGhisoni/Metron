@@ -13,6 +13,21 @@ import {
 
 const REFRESH_COOKIE = "metron_rt";
 
+// Extract a refresh token from the request body (localStorage flow) or the
+// signed httpOnly cookie (fallback). Returns the raw JWT string or null.
+const extractRefreshToken = (
+  cookies: Record<string, string | undefined>,
+  unsignCookie: (value: string) => { valid: boolean; value: string | null },
+  body: { refreshToken?: string } | null
+): string | null => {
+  if (body?.refreshToken) return body.refreshToken;
+
+  const raw = cookies[REFRESH_COOKIE];
+  if (!raw) return null;
+  const unsigned = unsignCookie(raw);
+  return unsigned.valid && unsigned.value ? unsigned.value : null;
+};
+
 const authRoutes: FastifyPluginAsync = async (app) => {
   app.post("/register", async (req, reply) => {
     const body = RegisterBody.parse(req.body);
@@ -38,7 +53,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
     await persistRefreshToken(app.prisma, user.id, refreshToken, jti);
 
     reply.setCookie(REFRESH_COOKIE, refreshToken, refreshCookieOptions());
-    return reply.code(201).send({ user, accessToken });
+    return reply.code(201).send({ user, accessToken, refreshToken });
   });
 
   app.post("/login", async (req, reply) => {
@@ -64,34 +79,27 @@ const authRoutes: FastifyPluginAsync = async (app) => {
         currencyPref: user.currencyPref,
       },
       accessToken,
+      refreshToken,
     });
   });
 
   app.post("/refresh", async (req, reply) => {
-    const raw = req.cookies[REFRESH_COOKIE];
-    if (!raw) {
-      req.log.warn({ cookies: Object.keys(req.cookies) }, "refresh: cookie missing");
+    const tokenValue = extractRefreshToken(req.cookies, req.unsignCookie, req.body as { refreshToken?: string } | null);
+    if (!tokenValue) {
+      req.log.warn({ cookies: Object.keys(req.cookies) }, "refresh: no token in body or cookie");
       return reply.code(401).send({ error: "missing_refresh_token" });
-    }
-
-    const unsigned = req.unsignCookie(raw);
-    if (!unsigned.valid || unsigned.value === null) {
-      req.log.warn("refresh: cookie signature invalid");
-      return reply.code(401).send({ error: "invalid_refresh_token" });
     }
 
     let payload;
     try {
-      payload = app.verifyRefreshToken(unsigned.value);
+      payload = app.verifyRefreshToken(tokenValue);
     } catch {
       req.log.warn("refresh: JWT verification failed");
       return reply.code(401).send({ error: "invalid_refresh_token" });
     }
 
-    const rotated = await rotateRefreshToken(app.prisma, payload.jti, unsigned.value);
+    const rotated = await rotateRefreshToken(app.prisma, payload.jti, tokenValue);
     if (!rotated) {
-      // Token was already rotated or expired (e.g. concurrent refresh race).
-      // Return 401 without revoking all tokens to avoid false-positive lockouts.
       req.log.warn({ jti: payload.jti }, "refresh: token already rotated or expired");
       return reply.code(401).send({ error: "invalid_refresh_token" });
     }
@@ -108,20 +116,21 @@ const authRoutes: FastifyPluginAsync = async (app) => {
     await persistRefreshToken(app.prisma, user.id, newRefresh, newJti);
 
     reply.setCookie(REFRESH_COOKIE, newRefresh, refreshCookieOptions());
-    return reply.send({ user, accessToken });
+    return reply.send({ user, accessToken, refreshToken: newRefresh });
   });
 
   app.post("/logout", async (req, reply) => {
-    const raw = req.cookies[REFRESH_COOKIE];
-    if (raw) {
-      const unsigned = req.unsignCookie(raw);
-      if (unsigned.valid && unsigned.value) {
-        try {
-          const payload = app.verifyRefreshToken(unsigned.value);
-          await revokeRefreshToken(app.prisma, payload.jti);
-        } catch {
-          // ignore
-        }
+    const tokenValue = extractRefreshToken(
+      req.cookies,
+      req.unsignCookie,
+      req.body as { refreshToken?: string } | null
+    );
+    if (tokenValue) {
+      try {
+        const payload = app.verifyRefreshToken(tokenValue);
+        await revokeRefreshToken(app.prisma, payload.jti);
+      } catch {
+        // ignore — token might already be invalid
       }
     }
     reply.clearCookie(REFRESH_COOKIE, { path: "/api/auth" });
