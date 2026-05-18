@@ -486,6 +486,11 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
             groupId: true,
           },
         },
+        recurringChildren: {
+          orderBy: { transactionDate: "desc" },
+          take: 1,
+          select: { transactionDate: true },
+        },
       },
     });
 
@@ -512,10 +517,10 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
       if (!template.recurringRule) return [];
 
       const occurrences: ReturnType<typeof serializeVirtualRecurring>[] = [];
-      let cursor = advanceRecurringDate(template.transactionDate, template.recurringRule);
-      while (cursor < now) {
-        cursor = advanceRecurringDate(cursor, template.recurringRule);
-      }
+      const lastGenerated = template.recurringChildren[0]?.transactionDate ?? null;
+      const anchor = lastGenerated ?? template.transactionDate;
+      let cursor = nextRecurringOnOrAfter(anchor, template.recurringRule, now);
+      let guard = 0;
 
       while (cursor <= end) {
         const key = `${template.id}:${cursor.toISOString()}`;
@@ -523,6 +528,8 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
           occurrences.push(serializeVirtualRecurring(template, cursor));
         }
         cursor = advanceRecurringDate(cursor, template.recurringRule);
+        guard += 1;
+        if (guard > 120) break;
       }
 
       return occurrences;
@@ -555,8 +562,44 @@ type RecurringForecastTemplate = Prisma.TransactionGetPayload<{
         groupId: true;
       };
     };
+    recurringChildren: {
+      orderBy: {
+        transactionDate: "desc";
+      };
+      take: 1;
+      select: {
+        transactionDate: true;
+      };
+    };
   };
 }>;
+
+function nextRecurringOnOrAfter(anchor: Date, rule: string, min: Date) {
+  let cursor = advanceRecurringDate(anchor, rule);
+  if (cursor >= min) return cursor;
+
+  const stepDays = rule === "weekly" ? 7 : rule === "biweekly" ? 14 : null;
+  if (stepDays) {
+    const stepMs = stepDays * 24 * 60 * 60 * 1000;
+    const jumps = Math.max(0, Math.floor((min.getTime() - cursor.getTime()) / stepMs));
+    cursor = new Date(cursor.getTime() + jumps * stepMs);
+  } else if (rule === "monthly") {
+    const cursorMonth = cursor.getUTCFullYear() * 12 + cursor.getUTCMonth();
+    const minMonth = min.getUTCFullYear() * 12 + min.getUTCMonth();
+    const jumps = Math.max(0, minMonth - cursorMonth - 1);
+    if (jumps > 0) cursor.setUTCMonth(cursor.getUTCMonth() + jumps);
+  } else if (rule === "yearly") {
+    const jumps = Math.max(0, min.getUTCFullYear() - cursor.getUTCFullYear() - 1);
+    if (jumps > 0) cursor.setUTCFullYear(cursor.getUTCFullYear() + jumps);
+  }
+
+  let guard = 0;
+  while (cursor < min && guard < 120) {
+    cursor = advanceRecurringDate(cursor, rule);
+    guard += 1;
+  }
+  return cursor;
+}
 
 function serializeVirtualRecurring(template: RecurringForecastTemplate, transactionDate: Date) {
   return {
