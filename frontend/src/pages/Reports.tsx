@@ -3,6 +3,7 @@ import clsx from "clsx";
 import {
   useCategories,
   useMonthlySeries,
+  useMonthlySummaries,
   useMonthlySummary,
   useNetWorthHistory,
 } from "../hooks/queries";
@@ -12,11 +13,13 @@ import {
   buildMonthValue,
   dualToString,
   formatMonthLabel,
+  getCategoryTrends,
   getComparisonDelta,
   getExpenseBreakdown,
   getMonthlySeriesChartData,
   getNetWorthChartData,
   getPreviousMonth,
+  getRecentMonths,
   parseMonthValue,
 } from "../lib/reporting";
 import {
@@ -47,8 +50,13 @@ export default function ReportsPage() {
 
   const selected = parseMonthValue(selectedMonth);
   const previous = getPreviousMonth(selected.year, selected.month);
+  const trendMonths = useMemo(
+    () => getRecentMonths(previous.year, previous.month, 3),
+    [previous.year, previous.month]
+  );
   const summaryQ = useMonthlySummary(selected.year, selected.month);
   const previousSummaryQ = useMonthlySummary(previous.year, previous.month);
+  const trendSummaryQs = useMonthlySummaries(trendMonths);
 
   const monthOptions = useMemo(
     () =>
@@ -70,6 +78,16 @@ export default function ReportsPage() {
   const categoryBreakdown = useMemo(
     () => getExpenseBreakdown(summaryQ.data, categoriesQ.data, displayCurrency).slice(0, 6),
     [summaryQ.data, categoriesQ.data, displayCurrency]
+  );
+  const categoryTrends = useMemo(
+    () =>
+      getCategoryTrends(
+        summaryQ.data,
+        trendSummaryQs.map((query) => query.data).filter((item): item is NonNullable<typeof item> => !!item),
+        categoriesQ.data,
+        displayCurrency
+      ).slice(0, 8),
+    [summaryQ.data, trendSummaryQs, categoriesQ.data, displayCurrency]
   );
 
   const selectedIncome = summaryQ.data ? dualToString(summaryQ.data.income, displayCurrency) : "0";
@@ -161,9 +179,64 @@ export default function ReportsPage() {
       >
         <CategoryExpenseDonut items={categoryBreakdown} currency={displayCurrency} />
       </PanelCard>
+
+      <PanelCard
+        title="Variacion por categoria"
+        subtitle="Mes seleccionado contra el promedio de los 3 meses anteriores."
+      >
+        <div className="overflow-hidden rounded-xl border border-slate-800">
+          {categoryTrends.map((item) => (
+            <div
+              key={item.categoryId ?? "uncategorized"}
+              className="grid gap-3 border-b border-slate-800 bg-slate-950/40 px-4 py-3 last:border-b-0 md:grid-cols-[minmax(0,1fr)_9rem_9rem_7rem]"
+            >
+              <div className="min-w-0">
+                <div className="flex items-center gap-3">
+                  <span
+                    className="inline-block h-2.5 w-2.5 rounded-full"
+                    style={{ backgroundColor: item.color }}
+                  />
+                  <div className="truncate text-sm font-medium text-slate-100">
+                    {item.icon ? `${item.icon} ` : ""}
+                    {item.label}
+                  </div>
+                </div>
+              </div>
+              <div className="text-sm text-slate-300 md:text-right">
+                {fmtMoney(item.current, displayCurrency)}
+              </div>
+              <div className="text-sm text-slate-500 md:text-right">
+                {fmtMoney(item.average, displayCurrency)}
+              </div>
+              <div className={clsx("text-sm font-medium md:text-right", trendTone(item.delta))}>
+                {formatTrend(item.ratio, item.delta)}
+              </div>
+            </div>
+          ))}
+
+          {!categoryTrends.length ? (
+            <div className="px-4 py-8 text-center text-sm text-slate-500">
+              Todavia no hay suficientes gastos para comparar categorias.
+            </div>
+          ) : null}
+        </div>
+      </PanelCard>
     </div>
   );
 }
+
+const trendTone = (delta: string) => {
+  const value = Number(delta);
+  if (value > 0) return "text-orange-300";
+  if (value < 0) return "text-emerald-400";
+  return "text-slate-500";
+};
+
+const formatTrend = (ratio: number | null, delta: string) => {
+  if (ratio === null) return Number(delta) > 0 ? "Nuevo" : "Sin base";
+  if (ratio === 0) return "0.0%";
+  return `${ratio > 0 ? "+" : ""}${(ratio * 100).toFixed(1)}%`;
+};
 
 const ComparisonCard = ({
   title,

@@ -6,7 +6,7 @@ import { toPrismaDecimal } from "../../lib/decimal.js";
 export const RECURRING_RULES = ["weekly", "biweekly", "monthly", "yearly"] as const;
 export type RecurringRule = (typeof RECURRING_RULES)[number];
 
-const advance = (d: Date, rule: string): Date => {
+export const advanceRecurringDate = (d: Date, rule: string): Date => {
   const n = new Date(d);
   switch (rule) {
     case "weekly":
@@ -43,8 +43,8 @@ export const generateRecurringInstances = async (app: FastifyInstance) => {
     if (!tpl.recurringRule) continue;
     const last = tpl.recurringChildren[0];
     let cursor = last
-      ? advance(last.transactionDate, tpl.recurringRule)
-      : advance(tpl.transactionDate, tpl.recurringRule);
+      ? advanceRecurringDate(last.transactionDate, tpl.recurringRule)
+      : advanceRecurringDate(tpl.transactionDate, tpl.recurringRule);
 
     while (cursor <= horizon) {
       const exists = await app.prisma.transaction.findFirst({
@@ -83,7 +83,7 @@ export const generateRecurringInstances = async (app: FastifyInstance) => {
         });
         created++;
       }
-      cursor = advance(cursor, tpl.recurringRule);
+      cursor = advanceRecurringDate(cursor, tpl.recurringRule);
     }
   }
   return { templates: templates.length, created };

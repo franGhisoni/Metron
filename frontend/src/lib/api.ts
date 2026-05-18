@@ -22,7 +22,14 @@ export const setOnUnauthorized = (cb: () => void) => {
 export type RefreshResult = {
   accessToken: string;
   refreshToken: string;
-  user: { id: string; email: string; phone: string | null; currencyPref: "ARS" | "USD" };
+  user: {
+    id: string;
+    email: string;
+    phone: string | null;
+    currencyPref: "ARS" | "USD";
+    fiftyThirtyTwenty: boolean;
+    liquidityAlertThreshold: string | null;
+  };
 };
 
 // ── localStorage session persistence ────────────────────────────────────────
@@ -56,6 +63,16 @@ export const loadPersistedSession = (): (RefreshResult & { expiresAt: number }) 
 export const clearPersistedSession = () => {
   try {
     localStorage.removeItem(SESSION_KEY);
+  } catch {
+    // ignore
+  }
+};
+
+export const updatePersistedUser = (user: RefreshResult["user"]) => {
+  try {
+    const stored = loadPersistedSession();
+    if (!stored) return;
+    persistSession({ ...stored, user });
   } catch {
     // ignore
   }

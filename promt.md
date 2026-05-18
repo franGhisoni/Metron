@@ -425,3 +425,31 @@ El siguiente paso recomendado es continuar Phase 2 con una de estas dos:
 2. Settings funcionales (`PATCH /api/users/me`)
 
 Si no se indica otra cosa, continuar por la opción 1: charts/reporting.
+
+---
+
+## Estado actualizado tras cierre de Phase 2
+
+### Phase 2 completa
+Quedaron implementados los bloques de Dashboard & Analytics:
+
+- Toggle global ARS/USD con Zustand persistido en localStorage, visible en header desktop/mobile y aplicado en Dashboard, Accounts y Transactions.
+- Charts con Recharts: ingresos vs gastos ultimos 12 meses, donut de gastos por categoria, patrimonio neto historico y cashflow proximos 30 dias.
+- Cashflow forecast con expansion virtual de transacciones recurrentes dentro de la ventana consultada, sin escribirlas en DB y sin duplicarlas si el job ya genero el hijo recurrente.
+- Liquidity alert banner basado en liquidityAlertThreshold.
+- CC debt widget en Dashboard, separado ARS/USD y con resumen actual/proximo.
+- Pagina /reports con selector de mes, comparativa vs mes anterior, series historicas y variacion por categoria contra promedio de 3 meses.
+- Settings funcionales con PATCH /api/auth/me para phone, currencyPref, liquidityAlertThreshold y fiftyThirtyTwenty.
+- Tracker 50/30/20 opt-in en Dashboard.
+
+Nota tecnica: el tracker 50/30/20 clasifica necesidades/deseos por heuristica de nombre de categoria en frontend. Si se quiere hacerlo editable por usuario, agregar un campo de clasificacion de presupuesto a Category en una fase futura.
+
+### Validacion tras cierre de Phase 2
+
+- backend: tsc --noEmit OK
+- frontend: tsc -b --noEmit OK
+- frontend: vite build OK (con warning normal de chunk grande)
+
+### Proximo paso recomendado
+
+Arrancar Phase 3: Proyecciones & Planning. Prioridad sugerida: Metas de ahorro / Wishlist, porque SavingsGoal ya existe en el schema.

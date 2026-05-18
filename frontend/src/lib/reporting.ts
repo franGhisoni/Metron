@@ -39,6 +39,15 @@ export const parseMonthValue = (value: string) => {
 export const getPreviousMonth = (year: number, month: number) =>
   month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
 
+export const getRecentMonths = (year: number, month: number, count: number) => {
+  const months: Array<{ year: number; month: number }> = [];
+  for (let offset = count - 1; offset >= 0; offset -= 1) {
+    const date = new Date(Date.UTC(year, month - 1 - offset, 1));
+    months.push({ year: date.getUTCFullYear(), month: date.getUTCMonth() + 1 });
+  }
+  return months;
+};
+
 export const formatMonthLabel = (year: number, month: number) => {
   const d = new Date(Date.UTC(year, month - 1, 1));
   const monthName = monthNameFormatter.format(d).replace(".", "");
@@ -94,6 +103,107 @@ export const getExpenseBreakdown = (
     })
     .filter((item) => item.value > 0)
     .sort((left, right) => right.value - left.value);
+};
+
+const NEED_KEYWORDS = [
+  "alquiler",
+  "educacion",
+  "educación",
+  "impuestos",
+  "salud",
+  "servicios",
+  "supermercado",
+  "transporte",
+];
+
+const classifyBudgetCategory = (label: string): "needs" | "wants" => {
+  const normalized = label.trim().toLowerCase();
+  return NEED_KEYWORDS.some((keyword) => normalized.includes(keyword)) ? "needs" : "wants";
+};
+
+export const getFiftyThirtyTwenty = (
+  summary: MonthlySummary | undefined,
+  categories: Category[] | undefined,
+  currency: Currency
+) => {
+  const categoriesById = new Map((categories ?? []).map((category) => [category.id, category] as const));
+  const income = new Decimal(summary ? dualToString(summary.income, currency) : "0");
+  const net = new Decimal(summary ? dualToString(summary.net, currency) : "0");
+  let needs = new Decimal(0);
+  let wants = new Decimal(0);
+
+  for (const item of summary?.byCategory ?? []) {
+    const category = item.categoryId ? categoriesById.get(item.categoryId) : null;
+    const amount = new Decimal(dualToString(item, currency));
+    const bucket = classifyBudgetCategory(category?.name ?? "Otros");
+    if (bucket === "needs") needs = needs.plus(amount);
+    else wants = wants.plus(amount);
+  }
+
+  const savings = Decimal.max(net, 0);
+  const ratio = (value: Decimal) => (income.gt(0) ? value.div(income).toNumber() : null);
+
+  return {
+    income: income.toString(),
+    needs: needs.toString(),
+    wants: wants.toString(),
+    savings: savings.toString(),
+    targets: {
+      needs: income.mul(0.5).toString(),
+      wants: income.mul(0.3).toString(),
+      savings: income.mul(0.2).toString(),
+    },
+    ratios: {
+      needs: ratio(needs),
+      wants: ratio(wants),
+      savings: ratio(savings),
+    },
+  };
+};
+
+export const getCategoryTrends = (
+  currentSummary: MonthlySummary | undefined,
+  previousSummaries: MonthlySummary[],
+  categories: Category[] | undefined,
+  currency: Currency
+) => {
+  const categoriesById = new Map((categories ?? []).map((category) => [category.id, category] as const));
+  const currentByCategory = new Map(
+    (currentSummary?.byCategory ?? []).map((item) => [item.categoryId ?? "__uncategorized__", item] as const)
+  );
+  const ids = new Set<string>(currentByCategory.keys());
+  for (const summary of previousSummaries) {
+    for (const item of summary.byCategory) ids.add(item.categoryId ?? "__uncategorized__");
+  }
+
+  return Array.from(ids)
+    .map((id) => {
+      const categoryId = id === "__uncategorized__" ? null : id;
+      const category = categoryId ? categoriesById.get(categoryId) : null;
+      const current = new Decimal(
+        currentByCategory.has(id) ? dualToString(currentByCategory.get(id)!, currency) : "0"
+      );
+      const previousTotal = previousSummaries.reduce((total, summary) => {
+        const item = summary.byCategory.find((entry) => (entry.categoryId ?? "__uncategorized__") === id);
+        return total.plus(item ? dualToString(item, currency) : "0");
+      }, new Decimal(0));
+      const average = previousSummaries.length ? previousTotal.div(previousSummaries.length) : new Decimal(0);
+      const delta = current.minus(average);
+      const ratio = average.gt(0) ? delta.div(average).toNumber() : current.gt(0) ? null : 0;
+
+      return {
+        categoryId,
+        label: category?.name ?? "Sin categoria",
+        icon: category?.icon ?? "•",
+        color: category?.color ?? "#64748b",
+        current: current.toString(),
+        average: average.toString(),
+        delta: delta.toString(),
+        ratio,
+      };
+    })
+    .filter((item) => new Decimal(item.current).gt(0) || new Decimal(item.average).gt(0))
+    .sort((left, right) => new Decimal(right.current).minus(left.current).toNumber());
 };
 
 export const getCashflowTotals = (items: Transaction[] | undefined, currency: Currency) => {

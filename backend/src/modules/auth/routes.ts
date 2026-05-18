@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 import crypto from "node:crypto";
-import { RegisterBody, LoginBody } from "./schemas.js";
+import { RegisterBody, LoginBody, UpdateMeBody } from "./schemas.js";
 import {
   createDefaultCategoriesForUser,
   hashPassword,
@@ -12,6 +12,31 @@ import {
 } from "./service.js";
 
 const REFRESH_COOKIE = "metron_rt";
+
+const userSelect = {
+  id: true,
+  email: true,
+  phone: true,
+  currencyPref: true,
+  fiftyThirtyTwenty: true,
+  liquidityAlertThreshold: true,
+} as const;
+
+const serializeUser = (user: {
+  id: string;
+  email: string;
+  phone: string | null;
+  currencyPref: string;
+  fiftyThirtyTwenty: boolean;
+  liquidityAlertThreshold: { toString: () => string } | null;
+}) => ({
+  id: user.id,
+  email: user.email,
+  phone: user.phone,
+  currencyPref: user.currencyPref,
+  fiftyThirtyTwenty: user.fiftyThirtyTwenty,
+  liquidityAlertThreshold: user.liquidityAlertThreshold?.toString() ?? null,
+});
 
 // Extract a refresh token from the request body (localStorage flow) or the
 // signed httpOnly cookie (fallback). Returns the raw JWT string or null.
@@ -42,7 +67,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
         passwordHash,
         phone: body.phone ?? null,
       },
-      select: { id: true, email: true, phone: true, currencyPref: true },
+      select: userSelect,
     });
 
     await createDefaultCategoriesForUser(app.prisma, user.id);
@@ -53,7 +78,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
     await persistRefreshToken(app.prisma, user.id, refreshToken, jti);
 
     reply.setCookie(REFRESH_COOKIE, refreshToken, refreshCookieOptions());
-    return reply.code(201).send({ user, accessToken, refreshToken });
+    return reply.code(201).send({ user: serializeUser(user), accessToken, refreshToken });
   });
 
   app.post("/login", async (req, reply) => {
@@ -72,12 +97,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
 
     reply.setCookie(REFRESH_COOKIE, refreshToken, refreshCookieOptions());
     return reply.send({
-      user: {
-        id: user.id,
-        email: user.email,
-        phone: user.phone,
-        currencyPref: user.currencyPref,
-      },
+      user: serializeUser(user),
       accessToken,
       refreshToken,
     });
@@ -106,7 +126,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
 
     const user = await app.prisma.user.findUnique({
       where: { id: payload.sub },
-      select: { id: true, email: true, phone: true, currencyPref: true },
+      select: userSelect,
     });
     if (!user) return reply.code(401).send({ error: "invalid_refresh_token" });
 
@@ -116,7 +136,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
     await persistRefreshToken(app.prisma, user.id, newRefresh, newJti);
 
     reply.setCookie(REFRESH_COOKIE, newRefresh, refreshCookieOptions());
-    return reply.send({ user, accessToken, refreshToken: newRefresh });
+    return reply.send({ user: serializeUser(user), accessToken, refreshToken: newRefresh });
   });
 
   app.post("/logout", async (req, reply) => {
@@ -140,20 +160,36 @@ const authRoutes: FastifyPluginAsync = async (app) => {
   app.get("/me", { onRequest: [app.authenticate] }, async (req, reply) => {
     const user = await app.prisma.user.findUnique({
       where: { id: req.userId },
-      select: {
-        id: true,
-        email: true,
-        phone: true,
-        currencyPref: true,
-        fiftyThirtyTwenty: true,
-        liquidityAlertThreshold: true,
-      },
+      select: userSelect,
     });
     if (!user) return reply.code(404).send({ error: "not_found" });
-    return reply.send({
-      ...user,
-      liquidityAlertThreshold: user.liquidityAlertThreshold?.toString() ?? null,
+    return reply.send(serializeUser(user));
+  });
+
+  app.patch("/me", { onRequest: [app.authenticate] }, async (req, reply) => {
+    const body = UpdateMeBody.parse(req.body);
+
+    const user = await app.prisma.user.update({
+      where: { id: req.userId },
+      data: {
+        ...(body.phone !== undefined ? { phone: body.phone?.trim() || null } : {}),
+        ...(body.currencyPref !== undefined ? { currencyPref: body.currencyPref } : {}),
+        ...(body.fiftyThirtyTwenty !== undefined
+          ? { fiftyThirtyTwenty: body.fiftyThirtyTwenty }
+          : {}),
+        ...(body.liquidityAlertThreshold !== undefined
+          ? {
+              liquidityAlertThreshold:
+                body.liquidityAlertThreshold === null
+                  ? null
+                  : body.liquidityAlertThreshold.toString(),
+            }
+          : {}),
+      },
+      select: userSelect,
     });
+
+    return reply.send(serializeUser(user));
   });
 };
 

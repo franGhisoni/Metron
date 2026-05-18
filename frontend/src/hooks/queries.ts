@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import type {
   Account,
@@ -92,6 +92,16 @@ export const useMonthlySummary = (year: number, month: number) =>
         .data,
   });
 
+export const useMonthlySummaries = (months: Array<{ year: number; month: number }>) =>
+  useQueries({
+    queries: months.map(({ year, month }) => ({
+      queryKey: ["summary", year, month],
+      queryFn: async () =>
+        (await api.get<MonthlySummary>("/api/transactions/summary", { params: { year, month } }))
+          .data,
+    })),
+  });
+
 export const useMonthlySeries = (months = 12) =>
   useQuery({
     queryKey: ["reports", "monthly-series", months],
@@ -130,6 +140,16 @@ export const useCreditCardStatus = (accountId: string | null | undefined) =>
     queryKey: ["creditCardStatus", accountId],
     queryFn: async () =>
       (await api.get<CreditCardStatus>(`/api/accounts/${accountId}/credit-card-status`)).data,
+  });
+
+export const useCreditCardStatuses = (accountIds: string[]) =>
+  useQueries({
+    queries: accountIds.map((accountId) => ({
+      queryKey: ["creditCardStatus", accountId],
+      queryFn: async () =>
+        (await api.get<CreditCardStatus>(`/api/accounts/${accountId}/credit-card-status`)).data,
+      enabled: !!accountId,
+    })),
   });
 
 export const useCreateTransaction = () => {

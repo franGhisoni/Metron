@@ -10,6 +10,7 @@ import {
 } from "./schemas.js";
 import { applyBalanceDelta, getBalanceDelta } from "./balance.js";
 import { computeDualAmounts, serializeTransaction } from "./service.js";
+import { advanceRecurringDate } from "./recurringJob.js";
 import { getCurrentRate } from "../rates/service.js";
 import { assertAccountOwned } from "../accounts/service.js";
 import { Decimal, toPrismaDecimal } from "../../lib/decimal.js";
@@ -473,11 +474,70 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
       orderBy: [{ dueDate: "asc" }, { transactionDate: "asc" }],
     });
 
-    // TODO: Phase 2 - expand recurring transactions into forecast window.
+    const templates = await app.prisma.transaction.findMany({
+      where: {
+        userId: req.userId,
+        isRecurring: true,
+        recurringRule: { not: null },
+      },
+      include: {
+        groupLinks: {
+          select: {
+            groupId: true,
+          },
+        },
+      },
+    });
+
+    const templateIds = templates.map((template) => template.id);
+    const existingRecurring =
+      templateIds.length > 0
+        ? await app.prisma.transaction.findMany({
+            where: {
+              userId: req.userId,
+              recurringParentId: { in: templateIds },
+              transactionDate: { gte: now, lte: end },
+            },
+            select: {
+              recurringParentId: true,
+              transactionDate: true,
+            },
+          })
+        : [];
+    const existingByParentAndDate = new Set(
+      existingRecurring.map((row) => `${row.recurringParentId}:${row.transactionDate.toISOString()}`)
+    );
+
+    const virtualRecurring = templates.flatMap((template) => {
+      if (!template.recurringRule) return [];
+
+      const occurrences: ReturnType<typeof serializeVirtualRecurring>[] = [];
+      let cursor = advanceRecurringDate(template.transactionDate, template.recurringRule);
+      while (cursor < now) {
+        cursor = advanceRecurringDate(cursor, template.recurringRule);
+      }
+
+      while (cursor <= end) {
+        const key = `${template.id}:${cursor.toISOString()}`;
+        if (!existingByParentAndDate.has(key)) {
+          occurrences.push(serializeVirtualRecurring(template, cursor));
+        }
+        cursor = advanceRecurringDate(cursor, template.recurringRule);
+      }
+
+      return occurrences;
+    });
+
+    const items = [...upcoming.map(serializeTransaction), ...virtualRecurring].sort(
+      (left, right) =>
+        new Date(left.dueDate ?? left.transactionDate).getTime() -
+        new Date(right.dueDate ?? right.transactionDate).getTime()
+    );
+
     return {
       from: now.toISOString(),
       to: end.toISOString(),
-      items: upcoming.map(serializeTransaction),
+      items,
     };
   });
 };
@@ -486,4 +546,40 @@ export default transactionRoutes;
 
 function dedupeIds(ids: string[] | undefined) {
   return [...new Set((ids ?? []).filter(Boolean))];
+}
+
+type RecurringForecastTemplate = Prisma.TransactionGetPayload<{
+  include: {
+    groupLinks: {
+      select: {
+        groupId: true;
+      };
+    };
+  };
+}>;
+
+function serializeVirtualRecurring(template: RecurringForecastTemplate, transactionDate: Date) {
+  return {
+    id: `forecast:${template.id}:${transactionDate.toISOString()}`,
+    accountId: template.accountId,
+    categoryId: template.categoryId,
+    groupIds: template.groupLinks?.map((link) => link.groupId) ?? [],
+    type: template.type,
+    amountArs: template.amountArs.toString(),
+    amountUsd: template.amountUsd.toString(),
+    exchangeRate: template.exchangeRate.toString(),
+    currency: template.currency,
+    description: template.description,
+    paymentMethod: template.paymentMethod,
+    transactionDate: transactionDate.toISOString(),
+    dueDate: null,
+    status: "scheduled",
+    isRecurring: false,
+    recurringRule: null,
+    recurringParentId: template.id,
+    linkedTransactionId: null,
+    installmentTotal: template.installmentTotal,
+    installmentCurrent: template.installmentCurrent,
+    createdAt: template.createdAt.toISOString(),
+  };
 }

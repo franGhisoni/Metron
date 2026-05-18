@@ -16,6 +16,7 @@ import {
   persistSession,
   clearPersistedSession,
   loadPersistedSession,
+  updatePersistedUser,
   type RefreshResult,
 } from "./api";
 
@@ -24,6 +25,8 @@ export type User = {
   email: string;
   phone: string | null;
   currencyPref: "ARS" | "USD";
+  fiftyThirtyTwenty: boolean;
+  liquidityAlertThreshold: string | null;
 };
 
 type AuthState = {
@@ -33,6 +36,12 @@ type AuthState = {
   register: (email: string, password: string, phone?: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
+  updateProfile: (body: {
+    phone: string | null;
+    currencyPref: "ARS" | "USD";
+    fiftyThirtyTwenty: boolean;
+    liquidityAlertThreshold: string | null;
+  }) => Promise<User>;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -132,9 +141,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [clearAuth]);
 
+  const updateProfile = useCallback(async (body: {
+    phone: string | null;
+    currencyPref: "ARS" | "USD";
+    fiftyThirtyTwenty: boolean;
+    liquidityAlertThreshold: string | null;
+  }) => {
+    const res = await api.patch<User>("/api/auth/me", body);
+    setUser(res.data);
+    updatePersistedUser(res.data);
+    return res.data;
+  }, []);
+
   const value = useMemo<AuthState>(
-    () => ({ user, loading, login, register, logout, refresh }),
-    [user, loading, login, register, logout, refresh]
+    () => ({ user, loading, login, register, logout, refresh, updateProfile }),
+    [user, loading, login, register, logout, refresh, updateProfile]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

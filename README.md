@@ -160,11 +160,21 @@ the apex or switch to `SameSite=None` explicitly. Keep this in mind before going
       accounts with credit-card widget, settings placeholder
 - [x] PWA manifest + service worker (API `GET` caching)
 
+## What's implemented (Phase 2)
+
+- Global ARS/USD display toggle persisted in localStorage
+- Dashboard charts: income vs expenses, net worth history, category donut
+- Reports page with month selector, month-over-month comparison, and category variance
+- Cashflow forecast with pending/scheduled transactions and virtual recurring expansion
+- Liquidity alert banner
+- Credit-card debt widget split by ARS/USD
+- Functional settings for phone, preferred currency, liquidity threshold, and 50/30/20 opt-in
+- 50/30/20 dashboard tracker
+
 ## What's next
 
-Phase 2 — dashboard charts (Recharts), cashflow intelligence, liquidity alerts,
-50/30/20, monthly summary UI. Then investments, then AI insights. Do not start Phase 2
-until Phase 1 is manually validated end-to-end.
+Phase 3 - projections and planning: savings goals / wishlist, installment-vs-cash
+simulator, spending projections, and financial health score. Then investments, then AI insights.
 
 The WhatsApp integration will land in Phase 5 via n8n → the existing
 `POST /api/webhooks/whatsapp` stub.
