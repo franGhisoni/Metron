@@ -131,13 +131,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const logout = useCallback(async () => {
     _bootstrapped = false;
     const stored = loadPersistedSession();
+    clearAuth();
     try {
       await api.post(
         "/api/auth/logout",
         stored?.refreshToken ? { refreshToken: stored.refreshToken } : {}
       );
-    } finally {
-      clearAuth();
+    } catch {
+      // Local logout should not depend on the backend being reachable.
     }
   }, [clearAuth]);
 
