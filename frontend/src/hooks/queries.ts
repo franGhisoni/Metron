@@ -9,8 +9,10 @@ import type {
   MonthlySeriesPoint,
   NetWorthHistoryPoint,
   Rates,
+  SavingsGoal,
   Transaction,
   TransactionGroup,
+  TransactionGroupInvite,
 } from "../lib/types";
 
 export const useAccounts = () =>
@@ -29,6 +31,13 @@ export const useGroups = () =>
   useQuery({
     queryKey: ["groups"],
     queryFn: async () => (await api.get<TransactionGroup[]>("/api/groups")).data,
+  });
+
+export const usePendingGroupInvites = () =>
+  useQuery({
+    queryKey: ["groups", "invites", "pending"],
+    queryFn: async () =>
+      (await api.get<TransactionGroupInvite[]>("/api/groups/invites/pending")).data,
   });
 
 export const useRates = () =>
@@ -53,6 +62,10 @@ type TransactionParams = {
   cursor?: string;
 };
 
+type GroupScopedParams = {
+  groupIds?: string[];
+};
+
 // Build query string manually so arrays use repeated keys (types=a&types=b)
 // instead of axios's default bracket notation (types[]=a) which Fastify ignores.
 function buildTxQS(p: TransactionParams): string {
@@ -71,6 +84,10 @@ function buildTxQS(p: TransactionParams): string {
   return usp.toString();
 }
 
+function appendGroupIds(usp: URLSearchParams, groupIds?: string[]) {
+  groupIds?.forEach((groupId) => usp.append("groupIds", groupId));
+}
+
 export const useTransactions = (params: TransactionParams) => {
   const qs = buildTxQS(params);
   return useQuery({
@@ -84,54 +101,69 @@ export const useTransactions = (params: TransactionParams) => {
   });
 };
 
-export const useMonthlySummary = (year: number, month: number) =>
+export const useMonthlySummary = (year: number, month: number, params?: GroupScopedParams) =>
   useQuery({
-    queryKey: ["summary", year, month],
-    queryFn: async () =>
-      (await api.get<MonthlySummary>("/api/transactions/summary", { params: { year, month } }))
-        .data,
+    queryKey: ["summary", year, month, params],
+    queryFn: async () => {
+      const usp = new URLSearchParams({ year: String(year), month: String(month) });
+      appendGroupIds(usp, params?.groupIds);
+      return (await api.get<MonthlySummary>(`/api/transactions/summary?${usp.toString()}`)).data;
+    },
   });
 
-export const useMonthlySummaries = (months: Array<{ year: number; month: number }>) =>
+export const useMonthlySummaries = (
+  months: Array<{ year: number; month: number }>,
+  params?: GroupScopedParams
+) =>
   useQueries({
     queries: months.map(({ year, month }) => ({
-      queryKey: ["summary", year, month],
-      queryFn: async () =>
-        (await api.get<MonthlySummary>("/api/transactions/summary", { params: { year, month } }))
-          .data,
+      queryKey: ["summary", year, month, params],
+      queryFn: async () => {
+        const usp = new URLSearchParams({ year: String(year), month: String(month) });
+        appendGroupIds(usp, params?.groupIds);
+        return (await api.get<MonthlySummary>(`/api/transactions/summary?${usp.toString()}`)).data;
+      },
     })),
   });
 
-export const useMonthlySeries = (months = 12) =>
+export const useMonthlySeries = (months = 12, params?: GroupScopedParams) =>
   useQuery({
-    queryKey: ["reports", "monthly-series", months],
-    queryFn: async () =>
-      (
+    queryKey: ["reports", "monthly-series", months, params],
+    queryFn: async () => {
+      const usp = new URLSearchParams({ months: String(months) });
+      appendGroupIds(usp, params?.groupIds);
+      return (
         await api.get<{ months: number; items: MonthlySeriesPoint[] }>(
-          "/api/reports/monthly-series",
-          { params: { months } }
+          `/api/reports/monthly-series?${usp.toString()}`
         )
-      ).data,
+      ).data;
+    },
   });
 
-export const useNetWorthHistory = (months = 12) =>
+export const useNetWorthHistory = (months = 12, params?: GroupScopedParams) =>
   useQuery({
-    queryKey: ["reports", "net-worth-history", months],
-    queryFn: async () =>
-      (
+    queryKey: ["reports", "net-worth-history", months, params],
+    queryFn: async () => {
+      const usp = new URLSearchParams({ months: String(months) });
+      appendGroupIds(usp, params?.groupIds);
+      return (
         await api.get<{ months: number; items: NetWorthHistoryPoint[] }>(
-          "/api/reports/net-worth-history",
-          { params: { months } }
+          `/api/reports/net-worth-history?${usp.toString()}`
         )
-      ).data,
+      ).data;
+    },
   });
 
-export const useCashflowForecast = (days = 30) =>
+export const useCashflowForecast = (days = 30, params?: GroupScopedParams) =>
   useQuery({
-    queryKey: ["reports", "cashflow-forecast", days],
-    queryFn: async () =>
-      (await api.get<CashflowForecast>("/api/transactions/cashflow-forecast", { params: { days } }))
-        .data,
+    queryKey: ["reports", "cashflow-forecast", days, params],
+    queryFn: async () => {
+      const usp = new URLSearchParams({ days: String(days) });
+      appendGroupIds(usp, params?.groupIds);
+      return (
+        await api.get<CashflowForecast>(`/api/transactions/cashflow-forecast?${usp.toString()}`)
+      ).data;
+    },
   });
 
 export const useCreditCardStatus = (accountId: string | null | undefined) =>
@@ -150,6 +182,12 @@ export const useCreditCardStatuses = (accountIds: string[]) =>
         (await api.get<CreditCardStatus>(`/api/accounts/${accountId}/credit-card-status`)).data,
       enabled: !!accountId,
     })),
+  });
+
+export const useGoals = () =>
+  useQuery({
+    queryKey: ["goals"],
+    queryFn: async () => (await api.get<SavingsGoal[]>("/api/goals")).data,
   });
 
 export const useCreateTransaction = () => {
@@ -269,6 +307,42 @@ export const useDeleteGroup = () => {
   });
 };
 
+export const useInviteGroupMember = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ groupId, email }: { groupId: string; email: string }) =>
+      (await api.post<TransactionGroupInvite>(`/api/groups/${groupId}/invites`, { email })).data,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["groups"] });
+    },
+  });
+};
+
+export const useAcceptGroupInvite = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (inviteId: string) =>
+      (await api.post<TransactionGroup>(`/api/groups/invites/${inviteId}/accept`)).data,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["groups"] });
+      void qc.invalidateQueries({ queryKey: ["groups", "invites", "pending"] });
+    },
+  });
+};
+
+export const useDismissGroupInvite = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (inviteId: string) => {
+      await api.delete(`/api/groups/invites/${inviteId}`);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["groups"] });
+      void qc.invalidateQueries({ queryKey: ["groups", "invites", "pending"] });
+    },
+  });
+};
+
 export const useCreateAccount = () => {
   const qc = useQueryClient();
   return useMutation({
@@ -277,6 +351,40 @@ export const useCreateAccount = () => {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["accounts"] });
       void qc.invalidateQueries({ queryKey: ["reports"] });
+    },
+  });
+};
+
+export const useCreateGoal = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: Record<string, unknown>) =>
+      (await api.post<SavingsGoal>("/api/goals", body)).data,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["goals"] });
+    },
+  });
+};
+
+export const useUpdateGoal = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...body }: { id: string } & Record<string, unknown>) =>
+      (await api.put<SavingsGoal>(`/api/goals/${id}`, body)).data,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["goals"] });
+    },
+  });
+};
+
+export const useDeleteGoal = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/api/goals/${id}`);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["goals"] });
     },
   });
 };

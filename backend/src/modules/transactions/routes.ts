@@ -13,6 +13,7 @@ import { computeDualAmounts, serializeTransaction } from "./service.js";
 import { advanceRecurringDate } from "./recurringJob.js";
 import { getCurrentRate } from "../rates/service.js";
 import { assertAccountOwned } from "../accounts/service.js";
+import { accessibleGroupWhere } from "../groups/routes.js";
 import { Decimal, toPrismaDecimal } from "../../lib/decimal.js";
 
 const transactionRoutes: FastifyPluginAsync = async (app) => {
@@ -20,9 +21,21 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
 
   app.get("/", async (req) => {
     const q = ListTransactionsQuery.parse(req.query);
+    const requestedGroupIds = dedupeIds(q.groupIds);
+    if (requestedGroupIds.length) {
+      const groups = await app.prisma.transactionGroup.findMany({
+        where: {
+          AND: [accessibleGroupWhere(req.userId), { id: { in: requestedGroupIds } }],
+        },
+        select: { id: true },
+      });
+      if (groups.length !== requestedGroupIds.length) {
+        return { items: [], nextCursor: null };
+      }
+    }
 
     const where: Prisma.TransactionWhereInput = {
-      userId: req.userId,
+      ...(requestedGroupIds.length ? {} : { userId: req.userId }),
       ...(q.accountId ? { accountId: q.accountId } : {}),
       ...(q.categoryIds?.length
         ? { categoryId: { in: q.categoryIds } }
@@ -30,12 +43,12 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
           ? { categoryId: q.categoryId }
           : {}),
       ...(q.types?.length ? { type: { in: q.types } } : q.type ? { type: q.type } : {}),
-      ...(q.groupIds?.length
+      ...(requestedGroupIds.length
         ? {
             groupLinks: {
               some: {
                 groupId: {
-                  in: q.groupIds,
+                  in: requestedGroupIds,
                 },
               },
             },
@@ -91,8 +104,7 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
     if (groupIds.length) {
       const groups = await app.prisma.transactionGroup.findMany({
         where: {
-          userId: req.userId,
-          id: { in: groupIds },
+          AND: [accessibleGroupWhere(req.userId), { id: { in: groupIds } }],
         },
         select: { id: true },
       });
@@ -198,8 +210,7 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
     if (nextGroupIds?.length) {
       const groups = await app.prisma.transactionGroup.findMany({
         where: {
-          userId: req.userId,
-          id: { in: nextGroupIds },
+          AND: [accessibleGroupWhere(req.userId), { id: { in: nextGroupIds } }],
         },
         select: { id: true },
       });
@@ -392,12 +403,26 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
   // Monthly summary: totals by type in both currencies.
   app.get("/summary", async (req) => {
     const q = SummaryQuery.parse(req.query);
+    const requestedGroupIds = dedupeIds(q.groupIds);
+    const groupFilter = await buildAccessibleGroupFilter(app, req.userId, requestedGroupIds);
+    if (groupFilter === false) {
+      return {
+        year: q.year,
+        month: q.month,
+        income: { ars: "0", usd: "0" },
+        expense: { ars: "0", usd: "0" },
+        net: { ars: "0", usd: "0" },
+        savingsRate: null,
+        byCategory: [],
+      };
+    }
     const start = new Date(Date.UTC(q.year, q.month - 1, 1));
     const end = new Date(Date.UTC(q.year, q.month, 1));
 
     const rows = await app.prisma.transaction.findMany({
       where: {
-        userId: req.userId,
+        ...(requestedGroupIds.length ? {} : { userId: req.userId }),
+        ...(groupFilter || {}),
         transactionDate: { gte: start, lt: end },
       },
       select: {
@@ -452,12 +477,23 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
 
   app.get("/cashflow-forecast", async (req) => {
     const q = CashflowForecastQuery.parse(req.query);
+    const requestedGroupIds = dedupeIds(q.groupIds);
+    const groupFilter = await buildAccessibleGroupFilter(app, req.userId, requestedGroupIds);
     const now = new Date();
     const end = new Date(now.getTime() + q.days * 24 * 60 * 60 * 1000);
 
+    if (groupFilter === false) {
+      return {
+        from: now.toISOString(),
+        to: end.toISOString(),
+        items: [],
+      };
+    }
+
     const upcoming = await app.prisma.transaction.findMany({
       where: {
-        userId: req.userId,
+        ...(requestedGroupIds.length ? {} : { userId: req.userId }),
+        ...(groupFilter || {}),
         status: { in: ["pending", "scheduled"] },
         OR: [
           { dueDate: { gte: now, lte: end } },
@@ -476,7 +512,8 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
 
     const templates = await app.prisma.transaction.findMany({
       where: {
-        userId: req.userId,
+        ...(requestedGroupIds.length ? {} : { userId: req.userId }),
+        ...(groupFilter || {}),
         isRecurring: true,
         recurringRule: { not: null },
       },
@@ -499,7 +536,8 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
       templateIds.length > 0
         ? await app.prisma.transaction.findMany({
             where: {
-              userId: req.userId,
+              ...(requestedGroupIds.length ? {} : { userId: req.userId }),
+              ...(groupFilter || {}),
               recurringParentId: { in: templateIds },
               transactionDate: { gte: now, lte: end },
             },
@@ -553,6 +591,30 @@ export default transactionRoutes;
 
 function dedupeIds(ids: string[] | undefined) {
   return [...new Set((ids ?? []).filter(Boolean))];
+}
+
+async function buildAccessibleGroupFilter(
+  app: Parameters<FastifyPluginAsync>[0],
+  userId: string,
+  groupIds: string[]
+): Promise<Prisma.TransactionWhereInput | false | null> {
+  if (!groupIds.length) return null;
+
+  const groups = await app.prisma.transactionGroup.findMany({
+    where: {
+      AND: [accessibleGroupWhere(userId), { id: { in: groupIds } }],
+    },
+    select: { id: true },
+  });
+  if (groups.length !== groupIds.length) return false;
+
+  return {
+    groupLinks: {
+      some: {
+        groupId: { in: groupIds },
+      },
+    },
+  };
 }
 
 type RecurringForecastTemplate = Prisma.TransactionGetPayload<{

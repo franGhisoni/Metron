@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import type { Redis } from "ioredis";
 import { Decimal, serializeDecimal } from "../../lib/decimal.js";
 import { getCurrentRate } from "../rates/service.js";
@@ -78,7 +78,13 @@ const resolveRateAt = async (
   return bySnapshot;
 };
 
-export const getMonthlySeries = async (prisma: PrismaClient, userId: string, months: number) => {
+export const getMonthlySeries = async (
+  prisma: PrismaClient,
+  userId: string,
+  months: number,
+  groupFilter: Prisma.TransactionWhereInput | null = null,
+  isGroupScoped = false
+) => {
   const frames = buildMonthFrames(months);
   const firstFrame = frames[0]!;
   const lastFrame = frames[frames.length - 1]!;
@@ -86,7 +92,8 @@ export const getMonthlySeries = async (prisma: PrismaClient, userId: string, mon
 
   const rows = await prisma.transaction.findMany({
     where: {
-      userId,
+      ...(isGroupScoped ? {} : { userId }),
+      ...(groupFilter || {}),
       transactionDate: {
         gte: firstFrame.start,
         lt: rangeEnd,
@@ -146,7 +153,9 @@ export const getNetWorthHistory = async (
   prisma: PrismaClient,
   redis: Redis,
   userId: string,
-  months: number
+  months: number,
+  groupFilter: Prisma.TransactionWhereInput | null = null,
+  isGroupScoped = false
 ) => {
   const now = new Date();
   const frames = buildMonthFrames(months, now);
@@ -154,6 +163,10 @@ export const getNetWorthHistory = async (
     snapshotDateForFrame(frame, frames[index + 1] ?? null, now)
   );
   const ratesBySnapshot = await resolveRateAt(prisma, redis, points);
+
+  if (isGroupScoped) {
+    return getGroupScopedNetHistory(prisma, userId, frames, points, ratesBySnapshot, groupFilter);
+  }
 
   const accounts = await prisma.account.findMany({
     where: {
@@ -295,4 +308,69 @@ export const getNetWorthHistory = async (
   }
 
   return seriesDesc.reverse();
+};
+
+const getGroupScopedNetHistory = async (
+  prisma: PrismaClient,
+  userId: string,
+  frames: MonthFrame[],
+  points: Date[],
+  ratesBySnapshot: Map<string, string>,
+  groupFilter: Prisma.TransactionWhereInput | null
+) => {
+  const firstFrame = frames[0]!;
+  const lastFrame = frames[frames.length - 1]!;
+  const rangeEnd = new Date(Date.UTC(lastFrame.year, lastFrame.month, 1));
+
+  const rows = await prisma.transaction.findMany({
+    where: {
+      ...(groupFilter || {}),
+      transactionDate: {
+        gte: firstFrame.start,
+        lt: rangeEnd,
+      },
+    },
+    orderBy: [{ transactionDate: "asc" }, { id: "asc" }],
+    select: {
+      type: true,
+      amountArs: true,
+      amountUsd: true,
+      transactionDate: true,
+    },
+  });
+
+  const totalsByFrame = new Map<string, DualDecimal>();
+  for (const frame of frames) {
+    totalsByFrame.set(frame.label, dualZero());
+  }
+
+  for (const row of rows) {
+    if (row.type === "transfer") continue;
+    const label = `${row.transactionDate.getUTCFullYear()}-${pad(row.transactionDate.getUTCMonth() + 1)}`;
+    const totals = totalsByFrame.get(label);
+    if (!totals) continue;
+
+    const sign = row.type === "income" ? 1 : -1;
+    totals.ars = totals.ars.plus(new Decimal(row.amountArs.toString()).mul(sign));
+    totals.usd = totals.usd.plus(new Decimal(row.amountUsd.toString()).mul(sign));
+  }
+
+  let cumulative = dualZero();
+  return frames.map((frame, index) => {
+    const monthly = totalsByFrame.get(frame.label) ?? dualZero();
+    cumulative = {
+      ars: cumulative.ars.plus(monthly.ars),
+      usd: cumulative.usd.plus(monthly.usd),
+    };
+    const snapshotDate = points[index]!;
+    return {
+      year: frame.year,
+      month: frame.month,
+      label: frame.label,
+      snapshotDate: snapshotDate.toISOString(),
+      exchangeRate: ratesBySnapshot.get(snapshotDate.toISOString()) ?? "0",
+      netWorth: serializeDual(cumulative),
+      scope: "group",
+    };
+  });
 };

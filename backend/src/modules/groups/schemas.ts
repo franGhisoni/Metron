@@ -12,3 +12,9 @@ export const UpdateGroupBody = CreateGroupBody.partial();
 export type UpdateGroupBody = z.infer<typeof UpdateGroupBody>;
 
 export const GroupIdParam = z.object({ id: z.string().min(1) });
+export const InviteIdParam = z.object({ inviteId: z.string().min(1) });
+
+export const InviteGroupBody = z.object({
+  email: z.string().trim().email().max(255).transform((email) => email.toLowerCase()),
+});
+export type InviteGroupBody = z.infer<typeof InviteGroupBody>;

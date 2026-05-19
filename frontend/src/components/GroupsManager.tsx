@@ -1,8 +1,12 @@
 import { useState } from "react";
 import {
+  useAcceptGroupInvite,
   useCreateGroup,
   useDeleteGroup,
+  useDismissGroupInvite,
   useGroups,
+  useInviteGroupMember,
+  usePendingGroupInvites,
   useUpdateGroup,
 } from "../hooks/queries";
 import type { TransactionGroup } from "../lib/types";
@@ -20,9 +24,13 @@ const emptyErrors: DraftErrors = {};
 
 export default function GroupsManager() {
   const groupsQ = useGroups();
+  const pendingInvitesQ = usePendingGroupInvites();
   const createGroup = useCreateGroup();
   const updateGroup = useUpdateGroup();
   const deleteGroup = useDeleteGroup();
+  const inviteMember = useInviteGroupMember();
+  const acceptInvite = useAcceptGroupInvite();
+  const dismissInvite = useDismissGroupInvite();
 
   const [adding, setAdding] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -32,8 +40,10 @@ export default function GroupsManager() {
   const [editDraft, setEditDraft] = useState<Draft>(emptyDraft);
   const [editErrors, setEditErrors] = useState<DraftErrors>(emptyErrors);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [inviteDrafts, setInviteDrafts] = useState<Record<string, string>>({});
 
   const groups = groupsQ.data ?? [];
+  const pendingInvites = pendingInvitesQ.data ?? [];
   const busy = createGroup.isPending || updateGroup.isPending;
 
   const openAdd = () => {
@@ -119,6 +129,19 @@ export default function GroupsManager() {
     }
   };
 
+  const sendInvite = async (group: TransactionGroup) => {
+    const email = (inviteDrafts[group.id] ?? "").trim().toLowerCase();
+    if (!email) return;
+
+    try {
+      setFeedback(null);
+      await inviteMember.mutateAsync({ groupId: group.id, email });
+      setInviteDrafts((prev) => ({ ...prev, [group.id]: "" }));
+    } catch (error) {
+      setFeedback(getErrorMessage(error, "No pudimos crear la invitacion."));
+    }
+  };
+
   return (
     <>
       <CardShell>
@@ -128,6 +151,51 @@ export default function GroupsManager() {
           onAdd={adding ? closeAdd : openAdd}
           subtitle="Agrupa movimientos de distintos tipos bajo un mismo proyecto, cliente o unidad de negocio."
         />
+
+        {pendingInvites.length > 0 && (
+          <div className="mb-4 space-y-2 rounded-xl border border-brand-900/60 bg-brand-950/20 p-3">
+            <div className="text-xs uppercase tracking-wide text-brand-300">
+              Invitaciones pendientes
+            </div>
+            {pendingInvites.map((invite) => (
+              <div
+                key={invite.id}
+                className="grid gap-3 rounded-lg bg-slate-950/50 p-3 sm:grid-cols-[minmax(0,1fr)_auto]"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="inline-block h-3 w-3 rounded-full border border-white/10"
+                      style={{ backgroundColor: invite.groupColor }}
+                    />
+                    <span className="truncate text-sm font-medium text-slate-100">
+                      {invite.groupName}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-xs text-slate-400">
+                    {invite.invitedByEmail} te invito a compartir este grupo.
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => void acceptInvite.mutateAsync(invite.id)}
+                    disabled={acceptInvite.isPending || dismissInvite.isPending}
+                    className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-500 disabled:opacity-50"
+                  >
+                    Aceptar
+                  </button>
+                  <button
+                    onClick={() => void dismissInvite.mutateAsync(invite.id)}
+                    disabled={acceptInvite.isPending || dismissInvite.isPending}
+                    className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-slate-600 disabled:opacity-50"
+                  >
+                    Rechazar
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {feedback && (
           <div className="mb-4 rounded-md border border-rose-900/60 bg-rose-950/40 px-3 py-2 text-xs text-rose-200">
@@ -203,22 +271,62 @@ export default function GroupsManager() {
                         <div className="truncate text-sm font-medium text-slate-100">
                           {group.name}
                         </div>
-                        <div className="mt-1 text-xs text-slate-500">{group.color.toUpperCase()}</div>
+                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+                          <span>{group.color.toUpperCase()}</span>
+                          <span>{group.role === "owner" ? "Propio" : `Compartido por ${group.ownerEmail}`}</span>
+                          <span>{group.members.length} miembro(s)</span>
+                          {group.pendingInvites.length > 0 && (
+                            <span>{group.pendingInvites.length} invitacion(es) pendiente(s)</span>
+                          )}
+                        </div>
                       </div>
                     </div>
+                    <div className="mt-3 flex flex-wrap gap-1">
+                      {group.members.map((member) => (
+                        <span
+                          key={member.userId}
+                          className="rounded-md border border-slate-800 bg-slate-950 px-2 py-1 text-[11px] text-slate-300"
+                        >
+                          {member.email}
+                          {member.role === "owner" ? " · owner" : ""}
+                        </span>
+                      ))}
+                    </div>
+                    {group.role === "owner" && (
+                      <div className="mt-3 flex max-w-md gap-2">
+                        <input
+                          value={inviteDrafts[group.id] ?? ""}
+                          onChange={(event) =>
+                            setInviteDrafts((prev) => ({
+                              ...prev,
+                              [group.id]: event.target.value,
+                            }))
+                          }
+                          className={inputCls}
+                          placeholder="email@empresa.com"
+                        />
+                        <button
+                          onClick={() => void sendInvite(group)}
+                          disabled={inviteMember.isPending || !(inviteDrafts[group.id] ?? "").trim()}
+                          className="shrink-0 rounded-md border border-slate-700 px-3 py-2 text-xs text-slate-200 hover:border-brand-500 hover:text-brand-300 disabled:opacity-50"
+                        >
+                          Invitar
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2 sm:justify-end">
                     <button
                       onClick={() => startEdit(group)}
-                      disabled={busy || isDeleting}
+                      disabled={busy || isDeleting || group.role !== "owner"}
                       className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-brand-500 hover:text-brand-300 disabled:opacity-50"
                     >
                       Editar
                     </button>
                     <button
                       onClick={() => void remove(group)}
-                      disabled={busy || isDeleting}
+                      disabled={busy || isDeleting || group.role !== "owner"}
                       className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-rose-500 hover:text-rose-300 disabled:opacity-50"
                     >
                       {isDeleting ? "Eliminando..." : "Eliminar"}

@@ -45,6 +45,8 @@ model User {
   transactions     Transaction[]
   categories       Category[]
   transactionGroups TransactionGroup[]
+  transactionGroupMemberships TransactionGroupMember[]
+  sentTransactionGroupInvites TransactionGroupInvite[] @relation("TransactionGroupInviteSender")
   investments      Investment[]
   goals            SavingsGoal[]
   monthlySummaries MonthlySummary[]
@@ -149,9 +151,42 @@ model TransactionGroup {
 
   user             User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactionLinks TransactionGroupAssignment[]
+  members          TransactionGroupMember[]
+  invites          TransactionGroupInvite[]
 
   @@unique([userId, name])
   @@index([userId])
+}
+
+model TransactionGroupMember {
+  groupId   String
+  userId    String
+  role      String   @default("member")
+  createdAt DateTime @default(now())
+
+  group TransactionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, userId])
+  @@index([userId])
+}
+
+model TransactionGroupInvite {
+  id          String   @id @default(cuid())
+  groupId     String
+  email       String
+  invitedById String
+  status      String   @default("pending")
+  createdAt   DateTime @default(now())
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+
+  group     TransactionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  invitedBy User             @relation("TransactionGroupInviteSender", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, email, status])
+  @@index([email, status])
+  @@index([groupId])
 }
 
 model TransactionGroupAssignment {

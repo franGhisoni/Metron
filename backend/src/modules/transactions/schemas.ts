@@ -94,8 +94,10 @@ export type ListTransactionsQuery = z.infer<typeof ListTransactionsQuery>;
 export const SummaryQuery = z.object({
   month: z.coerce.number().int().min(1).max(12),
   year: z.coerce.number().int().min(2000).max(2100),
+  groupIds: QueryStringList,
 });
 
 export const CashflowForecastQuery = z.object({
   days: z.coerce.number().int().positive().max(365).default(30),
+  groupIds: QueryStringList,
 });

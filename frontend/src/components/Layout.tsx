@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import clsx from "clsx";
 import { useAuth } from "../lib/auth";
 import { useCurrencyStore } from "../lib/currency";
@@ -8,12 +8,15 @@ const NAV = [
   { to: "/reports", label: "Reportes" },
   { to: "/transactions", label: "Movimientos" },
   { to: "/accounts", label: "Cuentas" },
+  { to: "/goals", label: "Metas" },
   { to: "/settings", label: "Ajustes" },
 ];
 
 export const Layout = () => {
   const { user, logout } = useAuth();
   const { displayCurrency, setDisplayCurrency } = useCurrencyStore();
+  const location = useLocation();
+  const showQuickAdd = location.pathname !== "/transactions";
 
   return (
     <div className="flex min-h-full flex-col">
@@ -96,6 +99,15 @@ export const Layout = () => {
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
         <Outlet />
       </main>
+      {showQuickAdd && (
+        <Link
+          to="/transactions"
+          aria-label="Agregar movimiento"
+          className="fixed bottom-5 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-3xl leading-none text-white shadow-lg shadow-brand-950/50 transition hover:bg-brand-500 sm:hidden"
+        >
+          +
+        </Link>
+      )}
     </div>
   );
 };

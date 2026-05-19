@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import {
   useCategories,
+  useGroups,
   useMonthlySeries,
   useMonthlySummaries,
   useMonthlySummary,
@@ -31,9 +32,14 @@ import {
 
 export default function ReportsPage() {
   const { displayCurrency } = useCurrencyStore();
-  const seriesQ = useMonthlySeries(12);
-  const historyQ = useNetWorthHistory(12);
+  const [selectedGroupId, setSelectedGroupId] = useState("");
+  const scopedParams = selectedGroupId ? { groupIds: [selectedGroupId] } : undefined;
+  const seriesQ = useMonthlySeries(12, scopedParams);
+  const historyQ = useNetWorthHistory(12, scopedParams);
   const categoriesQ = useCategories();
+  const groupsQ = useGroups();
+  const selectedGroup = (groupsQ.data ?? []).find((group) => group.id === selectedGroupId) ?? null;
+  const isGroupScoped = !!selectedGroupId;
   const lastSeriesItem = seriesQ.data?.items[seriesQ.data.items.length - 1] ?? null;
 
   const defaultMonth = lastSeriesItem
@@ -54,9 +60,9 @@ export default function ReportsPage() {
     () => getRecentMonths(previous.year, previous.month, 3),
     [previous.year, previous.month]
   );
-  const summaryQ = useMonthlySummary(selected.year, selected.month);
-  const previousSummaryQ = useMonthlySummary(previous.year, previous.month);
-  const trendSummaryQs = useMonthlySummaries(trendMonths);
+  const summaryQ = useMonthlySummary(selected.year, selected.month, scopedParams);
+  const previousSummaryQ = useMonthlySummary(previous.year, previous.month, scopedParams);
+  const trendSummaryQs = useMonthlySummaries(trendMonths, scopedParams);
 
   const monthOptions = useMemo(
     () =>
@@ -107,24 +113,43 @@ export default function ReportsPage() {
         <div>
           <h1 className="text-2xl font-semibold">Reportes</h1>
           <p className="text-sm text-slate-400">
-            Comparativa mensual y series historicas usando la moneda global seleccionada.
+            {isGroupScoped
+              ? `Comparativa filtrada por ${selectedGroup?.name ?? "grupo"}.`
+              : "Comparativa mensual y series historicas usando la moneda global seleccionada."}
           </p>
         </div>
 
-        <label className="flex flex-col gap-1 text-sm text-slate-400">
-          Mes analizado
-          <select
-            value={selectedMonth}
-            onChange={(event) => setSelectedMonth(event.target.value)}
-            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none focus:border-brand-500"
-          >
-            {monthOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="flex flex-col gap-1 text-sm text-slate-400">
+            Grupo
+            <select
+              value={selectedGroupId}
+              onChange={(event) => setSelectedGroupId(event.target.value)}
+              className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none focus:border-brand-500"
+            >
+              <option value="">Todos</option>
+              {(groupsQ.data ?? []).map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm text-slate-400">
+            Mes analizado
+            <select
+              value={selectedMonth}
+              onChange={(event) => setSelectedMonth(event.target.value)}
+              className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-slate-100 outline-none focus:border-brand-500"
+            >
+              {monthOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
 
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -166,8 +191,12 @@ export default function ReportsPage() {
           <MonthlyIncomeExpenseChart data={monthlySeries} currency={displayCurrency} />
         </PanelCard>
         <PanelCard
-          title="Patrimonio neto"
-          subtitle="Cada punto usa el patrimonio reconstruido al cierre de mes."
+          title={isGroupScoped ? "Resultado acumulado" : "Patrimonio neto"}
+          subtitle={
+            isGroupScoped
+              ? "Acumulado mensual de ingresos menos gastos asociados al grupo."
+              : "Cada punto usa el patrimonio reconstruido al cierre de mes."
+          }
         >
           <NetWorthHistoryChart data={netWorthSeries} currency={displayCurrency} />
         </PanelCard>

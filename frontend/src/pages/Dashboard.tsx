@@ -1,9 +1,10 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import Decimal from "decimal.js";
 import {
   useAccounts,
   useCashflowForecast,
   useCategories,
+  useGroups,
   useMonthlySeries,
   useMonthlySummary,
   useNetWorthHistory,
@@ -31,14 +32,19 @@ export default function DashboardPage() {
   const year = now.getFullYear();
   const month = now.getMonth() + 1;
   const { displayCurrency } = useCurrencyStore();
+  const [selectedGroupId, setSelectedGroupId] = useState("");
 
   const accountsQ = useAccounts();
   const categoriesQ = useCategories();
-  const summaryQ = useMonthlySummary(year, month);
-  const seriesQ = useMonthlySeries(12);
-  const historyQ = useNetWorthHistory(12);
-  const cashflowQ = useCashflowForecast(30);
+  const groupsQ = useGroups();
+  const scopedParams = selectedGroupId ? { groupIds: [selectedGroupId] } : undefined;
+  const summaryQ = useMonthlySummary(year, month, scopedParams);
+  const seriesQ = useMonthlySeries(12, scopedParams);
+  const historyQ = useNetWorthHistory(12, scopedParams);
+  const cashflowQ = useCashflowForecast(30, scopedParams);
   const ratesQ = useRates();
+  const selectedGroup = (groupsQ.data ?? []).find((group) => group.id === selectedGroupId) ?? null;
+  const isGroupScoped = !!selectedGroupId;
 
   const accountNames = useMemo(
     () => new Map((accountsQ.data ?? []).map((account) => [account.id, account.name] as const)),
@@ -73,17 +79,36 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-2xl font-semibold">Panel</h1>
           <p className="text-sm text-slate-400">
-            Todos los montos principales siguen la moneda global elegida arriba.
+            {isGroupScoped
+              ? `Vista filtrada por ${selectedGroup?.name ?? "grupo"}.`
+              : "Todos los montos principales siguen la moneda global elegida arriba."}
           </p>
         </div>
-        <div className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-xs text-slate-400">
-          Vista actual en <span className="font-medium text-slate-100">{displayCurrency}</span>
+        <div className="grid gap-2 sm:grid-cols-[minmax(180px,1fr)_auto] sm:items-end">
+          <label className="flex flex-col gap-1 text-xs text-slate-400">
+            Grupo
+            <select
+              value={selectedGroupId}
+              onChange={(event) => setSelectedGroupId(event.target.value)}
+              className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-brand-500"
+            >
+              <option value="">Todos</option>
+              {(groupsQ.data ?? []).map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-xs text-slate-400">
+            Vista actual en <span className="font-medium text-slate-100">{displayCurrency}</span>
+          </div>
         </div>
       </div>
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card
-          title={`Patrimonio (${displayCurrency})`}
+          title={`${isGroupScoped ? "Resultado acumulado" : "Patrimonio"} (${displayCurrency})`}
           value={
             currentNetWorth
               ? fmtMoney(
@@ -126,7 +151,7 @@ export default function DashboardPage() {
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card
-          title={`Patrimonio (${mirrorCurrency})`}
+          title={`${isGroupScoped ? "Resultado acumulado" : "Patrimonio"} (${mirrorCurrency})`}
           value={
             currentNetWorth
               ? fmtMoney(
@@ -164,8 +189,12 @@ export default function DashboardPage() {
           <MonthlyIncomeExpenseChart data={monthlySeries} currency={displayCurrency} />
         </PanelCard>
         <PanelCard
-          title="Patrimonio neto"
-          subtitle="Serie mensual reconstruida desde balances actuales y movimientos historicos."
+          title={isGroupScoped ? "Resultado acumulado" : "Patrimonio neto"}
+          subtitle={
+            isGroupScoped
+              ? "Acumulado mensual de ingresos menos gastos asociados al grupo."
+              : "Serie mensual reconstruida desde balances actuales y movimientos historicos."
+          }
         >
           <NetWorthHistoryChart data={netWorthSeries} currency={displayCurrency} />
         </PanelCard>

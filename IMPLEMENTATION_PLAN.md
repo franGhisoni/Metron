@@ -312,3 +312,30 @@ Antes de cerrar:
 - Anotar pendientes reales.
 - Actualizar este plan si cambia el alcance.
 
+## Estado actualizado tras inicio de Phase 3
+
+Primer sub-bloque de planning financiero implementado:
+
+- CRUD backend de metas de ahorro en `GET/POST/PUT/DELETE /api/goals`.
+- Pantalla `/goals` con alta, edicion, baja, progreso, estado, fecha objetivo y ahorro mensual estimado.
+- Navegacion principal actualizada con "Metas".
+
+Pendientes de Phase 3:
+
+- Proyecciones de gastos por categoria.
+- Simulador cuotas vs contado.
+- Health score financiero.
+
+## Estado actualizado tras grupos compartidos
+
+Se agrego colaboracion basica sobre grupos de transacciones:
+
+- Los grupos pueden tener miembros e invitaciones por email.
+- El owner puede invitar desde Ajustes > Grupos.
+- El usuario invitado ve invitaciones pendientes y puede aceptar o rechazar.
+- Al filtrar movimientos por un grupo compartido, se ven los movimientos asociados por otros miembros.
+
+Pendiente para una segunda iteracion:
+
+- Envio real de email con proveedor SMTP/Resend/Postmark.
+- Roles mas finos, remocion de miembros y abandonar grupo.

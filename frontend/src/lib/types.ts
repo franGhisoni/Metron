@@ -64,10 +64,33 @@ export type Category = {
 export type TransactionGroup = {
   id: string;
   userId: string;
+  ownerEmail: string;
   name: string;
   color: string;
   createdAt: string;
   updatedAt: string;
+  role: "owner" | "member";
+  members: TransactionGroupMember[];
+  pendingInvites: TransactionGroupInvite[];
+};
+
+export type TransactionGroupMember = {
+  userId: string;
+  email: string;
+  role: "owner" | "member";
+  joinedAt: string;
+};
+
+export type TransactionGroupInvite = {
+  id: string;
+  groupId: string;
+  groupName: string;
+  groupColor: string;
+  ownerEmail: string;
+  email: string;
+  invitedByEmail: string;
+  status: string;
+  createdAt: string;
 };
 
 export type Rates = { blue: string; oficial: string; mep: string };
@@ -121,4 +144,18 @@ export type CashflowForecast = {
   from: string;
   to: string;
   items: Transaction[];
+};
+
+export type GoalStatus = "wishlist" | "active" | "completed" | "paused";
+
+export type SavingsGoal = {
+  id: string;
+  name: string;
+  targetAmount: string;
+  currency: Currency;
+  targetDate: string | null;
+  currentAmount: string;
+  status: GoalStatus;
+  createdAt: string;
+  updatedAt: string;
 };
