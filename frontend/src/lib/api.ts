@@ -5,6 +5,7 @@ import axios, { AxiosError, type AxiosRequestConfig } from "axios";
 // breaks cookie/same-origin behaviour.
 export const api = axios.create({
   withCredentials: true,
+  timeout: 10_000,
 });
 
 let accessToken: string | null = null;
@@ -94,7 +95,7 @@ export const doRefresh = async (): Promise<RefreshResult | null> => {
         const res = await axios.post<RefreshResult>(
           "/api/auth/refresh",
           body,
-          { withCredentials: true }
+          { withCredentials: true, timeout: 10_000 }
         );
         accessToken = res.data.accessToken;
         persistSession(res.data);
