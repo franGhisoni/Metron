@@ -1,9 +1,10 @@
 import axios, { AxiosError, type AxiosRequestConfig } from "axios";
 
-// Always use relative paths — Vite proxy handles dev, nginx handles prod.
-// Never set VITE_API_BASE_URL; doing so makes requests bypass nginx and
-// breaks cookie/same-origin behaviour.
+const API_BASE_URL = import.meta.env.PROD ? "https://metron-production.up.railway.app" : undefined;
+
+// Dev uses relative paths through Vite; prod bypasses the frontend /api proxy.
 export const api = axios.create({
+  baseURL: API_BASE_URL,
   withCredentials: true,
   timeout: 10_000,
 });
@@ -93,7 +94,7 @@ export const doRefresh = async (): Promise<RefreshResult | null> => {
 
       try {
         const res = await axios.post<RefreshResult>(
-          "/api/auth/refresh",
+          `${API_BASE_URL ?? ""}/api/auth/refresh`,
           body,
           { withCredentials: true, timeout: 10_000 }
         );
