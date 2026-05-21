@@ -253,11 +253,11 @@ Objetivo: administrar patrimonio invertido sin mezclarlo con el MVP transacciona
 
 Entregables:
 
-- CRUD de inversiones.
-- Valuacion manual inicial.
+- CRUD de inversiones. [implementado]
+- Valuacion manual inicial. [implementado]
 - Precios externos en una segunda iteracion.
-- Allocation por tipo de activo.
-- Performance vs dolar blue.
+- Allocation por tipo de activo. [implementado]
+- Performance vs dolar blue. [parcial: performance ARS/USD manual]
 
 Criterios de aceptacion:
 
@@ -322,9 +322,40 @@ Primer sub-bloque de planning financiero implementado:
 
 Pendientes de Phase 3:
 
-- Proyecciones de gastos por categoria.
 - Simulador cuotas vs contado.
 - Health score financiero.
+
+## Estado actualizado tras proyecciones por categoria
+
+Segundo sub-bloque de planning financiero implementado:
+
+- Endpoint `GET /api/reports/category-projections`.
+- Proyeccion del proximo mes por categoria usando promedio de los ultimos 3 meses cerrados.
+- Desvio/variabilidad por categoria para clasificar la estimacion como estable, variable, volatil o nueva.
+- La proyeccion respeta el filtro de grupo compartido/persona igual que Panel y Reportes.
+- Seccion "Proyeccion de gastos" agregada en `/reports`.
+
+Pendientes de Phase 3:
+
+- Simulador cuotas vs contado.
+- Health score financiero.
+
+## Estado actualizado tras inicio de inversiones
+
+Primer sub-bloque de portfolio implementado:
+
+- Endpoint `GET/POST/PUT/DELETE /api/investments`.
+- Endpoint `GET /api/investments/summary`.
+- Migracion para precio actual manual por posicion: `currentPriceArs`, `currentPriceUsd`, `lastPriceUpdatedAt`.
+- Pantalla `/investments` con alta, edicion, baja, totales invertidos, valor actual, resultado y retorno.
+- Tipos soportados: CEDEAR, cripto, bono, accion, FCI, plazo fijo y otros.
+- Valuacion manual ARS/USD usando precio de compra y precio actual opcional.
+
+Pendientes de inversiones:
+
+- Aplicar precios externos para cripto/acciones/CEDEARs/bonos cuando el proveedor quede definido.
+- Mejorar modelo de splits, compras parciales y ventas.
+- Comparar performance vs dolar blue por activo.
 
 ## Estado actualizado tras grupos compartidos
 

@@ -1,7 +1,11 @@
 import type { FastifyPluginAsync } from "fastify";
 import { Prisma } from "@prisma/client";
-import { ReportsRangeQuery } from "./schemas.js";
-import { getMonthlySeries, getNetWorthHistory } from "./service.js";
+import { CategoryProjectionQuery, ReportsRangeQuery } from "./schemas.js";
+import {
+  getCategoryExpenseProjections,
+  getMonthlySeries,
+  getNetWorthHistory,
+} from "./service.js";
 import { accessibleGroupWhere } from "../groups/routes.js";
 
 const reportRoutes: FastifyPluginAsync = async (app) => {
@@ -34,6 +38,26 @@ const reportRoutes: FastifyPluginAsync = async (app) => {
           : await getNetWorthHistory(
               app.prisma,
               app.redis,
+              req.userId,
+              q.months,
+              groupFilter,
+              groupIds.length > 0
+            ),
+    };
+  });
+
+  app.get("/category-projections", async (req) => {
+    const q = CategoryProjectionQuery.parse(req.query);
+    const groupIds = dedupeIds(q.groupIds);
+    const groupFilter = await buildAccessibleGroupFilter(app, req.userId, groupIds);
+
+    return {
+      months: q.months,
+      items:
+        groupFilter === false
+          ? []
+          : await getCategoryExpenseProjections(
+              app.prisma,
               req.userId,
               q.months,
               groupFilter,

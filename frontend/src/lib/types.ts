@@ -140,6 +140,23 @@ export type NetWorthHistoryPoint = {
   netWorth: DualAmount;
 };
 
+export type CategoryProjectionPoint = {
+  categoryId: string | null;
+  targetYear: number;
+  targetMonth: number;
+  baselineMonths: Array<{
+    year: number;
+    month: number;
+    label: string;
+    expense: DualAmount;
+  }>;
+  projected: DualAmount;
+  average: DualAmount;
+  stdDev: DualAmount;
+  volatilityRatio: number | null;
+  confidence: "stable" | "variable" | "volatile" | "new";
+};
+
 export type CashflowForecast = {
   from: string;
   to: string;
@@ -158,4 +175,47 @@ export type SavingsGoal = {
   status: GoalStatus;
   createdAt: string;
   updatedAt: string;
+};
+
+export type AssetType = "crypto" | "stock" | "cedear" | "bond" | "plazo_fijo" | "fci" | "other";
+
+export type Investment = {
+  id: string;
+  symbol: string;
+  name: string;
+  assetType: AssetType;
+  quantity: string;
+  purchasePriceUsd: string;
+  purchasePriceArs: string;
+  purchaseDate: string;
+  exchangeRateAtPurchase: string;
+  currentPriceUsd: string | null;
+  currentPriceArs: string | null;
+  lastPriceUpdatedAt: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+  metrics: {
+    invested: DualAmount;
+    currentValue: DualAmount;
+    pnl: DualAmount;
+    pnlPct: {
+      ars: number | null;
+      usd: number | null;
+    };
+  };
+};
+
+export type InvestmentSummary = {
+  invested: DualAmount;
+  currentValue: DualAmount;
+  pnl: DualAmount;
+  pnlPct: {
+    ars: number | null;
+    usd: number | null;
+  };
+  byAssetType: Array<{
+    assetType: AssetType;
+    value: DualAmount;
+  }>;
 };

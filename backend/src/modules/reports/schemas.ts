@@ -26,3 +26,10 @@ export const ReportsRangeQuery = z.object({
 });
 
 export type ReportsRangeQuery = z.infer<typeof ReportsRangeQuery>;
+
+export const CategoryProjectionQuery = z.object({
+  months: z.coerce.number().int().min(2).max(12).default(3),
+  groupIds: QueryStringList,
+});
+
+export type CategoryProjectionQuery = z.infer<typeof CategoryProjectionQuery>;

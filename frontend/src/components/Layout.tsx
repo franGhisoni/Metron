@@ -9,6 +9,7 @@ const NAV = [
   { to: "/transactions", label: "Movimientos" },
   { to: "/accounts", label: "Cuentas" },
   { to: "/goals", label: "Metas" },
+  { to: "/investments", label: "Inversiones" },
   { to: "/settings", label: "Ajustes" },
 ];
 

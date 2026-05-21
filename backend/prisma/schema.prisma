@@ -212,6 +212,9 @@ model Investment {
   purchasePriceArs       Decimal
   purchaseDate           DateTime
   exchangeRateAtPurchase Decimal
+  currentPriceUsd        Decimal?
+  currentPriceArs        Decimal?
+  lastPriceUpdatedAt     DateTime?
   notes                  String?
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt

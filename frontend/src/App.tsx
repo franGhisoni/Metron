@@ -9,6 +9,7 @@ import ReportsPage from "./pages/Reports";
 import TransactionsPage from "./pages/Transactions";
 import AccountsPage from "./pages/Accounts";
 import GoalsPage from "./pages/Goals";
+import InvestmentsPage from "./pages/Investments";
 import SettingsPage from "./pages/Settings";
 
 export default function App() {
@@ -28,8 +29,9 @@ export default function App() {
           <Route path="/transactions" element={<TransactionsPage />} />
           <Route path="/accounts" element={<AccountsPage />} />
           <Route path="/goals" element={<GoalsPage />} />
+          <Route path="/investments" element={<InvestmentsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
-          {/* TODO: Phase 3 - /simulators, /investments */}
+          {/* TODO: Phase 3 - /simulators */}
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

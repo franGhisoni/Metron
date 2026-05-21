@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import {
   useCategories,
+  useCategoryProjections,
   useGroups,
   useMonthlySeries,
   useMonthlySummaries,
@@ -29,6 +30,7 @@ import {
   NetWorthHistoryChart,
   PanelCard,
 } from "../components/reports/Charts";
+import type { Category, CategoryProjectionPoint, Currency } from "../lib/types";
 
 export default function ReportsPage() {
   const { displayCurrency } = useCurrencyStore();
@@ -36,6 +38,7 @@ export default function ReportsPage() {
   const scopedParams = selectedGroupId ? { groupIds: [selectedGroupId] } : undefined;
   const seriesQ = useMonthlySeries(12, scopedParams);
   const historyQ = useNetWorthHistory(12, scopedParams);
+  const projectionsQ = useCategoryProjections(3, scopedParams);
   const categoriesQ = useCategories();
   const groupsQ = useGroups();
   const selectedGroup = (groupsQ.data ?? []).find((group) => group.id === selectedGroupId) ?? null;
@@ -250,9 +253,95 @@ export default function ReportsPage() {
           ) : null}
         </div>
       </PanelCard>
+
+      <PanelCard
+        title="Proyeccion de gastos"
+        subtitle="Estimacion del proximo mes basada en los ultimos 3 meses cerrados."
+      >
+        <CategoryProjectionTable
+          items={projectionsQ.data?.items ?? []}
+          categories={categoriesQ.data ?? []}
+          currency={displayCurrency}
+        />
+      </PanelCard>
     </div>
   );
 }
+
+const CategoryProjectionTable = ({
+  items,
+  categories,
+  currency,
+}: {
+  items: CategoryProjectionPoint[];
+  categories: Category[];
+  currency: Currency;
+}) => {
+  const categoriesById = new Map(categories.map((category) => [category.id, category] as const));
+
+  if (!items.length) {
+    return (
+      <div className="rounded-xl border border-dashed border-slate-700 px-4 py-8 text-center text-sm text-slate-500">
+        Todavia no hay suficientes gastos cerrados para proyectar.
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-800">
+      {items.slice(0, 10).map((item) => {
+        const category = item.categoryId ? categoriesById.get(item.categoryId) : null;
+        const projected = dualToString(item.projected, currency);
+        const stdDev = dualToString(item.stdDev, currency);
+        return (
+          <div
+            key={item.categoryId ?? "uncategorized"}
+            className="grid gap-3 border-b border-slate-800 bg-slate-950/40 px-4 py-3 last:border-b-0 lg:grid-cols-[minmax(0,1fr)_9rem_9rem_8rem]"
+          >
+            <div className="min-w-0">
+              <div className="flex items-center gap-3">
+                <span
+                  className="inline-block h-2.5 w-2.5 rounded-full"
+                  style={{ backgroundColor: category?.color ?? "#64748b" }}
+                />
+                <div className="truncate text-sm font-medium text-slate-100">
+                  {category?.icon ? `${category.icon} ` : ""}
+                  {category?.name ?? "Sin categoria"}
+                </div>
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                Base: {item.baselineMonths.map((month) => month.label).join(", ")}
+              </div>
+            </div>
+            <div className="text-sm text-slate-300 lg:text-right">
+              {fmtMoney(projected, currency)}
+            </div>
+            <div className="text-sm text-slate-500 lg:text-right">
+              +/- {fmtMoney(stdDev, currency)}
+            </div>
+            <div className={clsx("text-sm font-medium lg:text-right", confidenceTone(item.confidence))}>
+              {confidenceLabel(item.confidence)}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+const confidenceLabel = (confidence: CategoryProjectionPoint["confidence"]) => {
+  if (confidence === "stable") return "Estable";
+  if (confidence === "variable") return "Variable";
+  if (confidence === "volatile") return "Volatil";
+  return "Nuevo";
+};
+
+const confidenceTone = (confidence: CategoryProjectionPoint["confidence"]) => {
+  if (confidence === "stable") return "text-emerald-400";
+  if (confidence === "variable") return "text-orange-300";
+  if (confidence === "volatile") return "text-rose-400";
+  return "text-sky-300";
+};
 
 const trendTone = (delta: string) => {
   const value = Number(delta);

@@ -4,7 +4,10 @@ import type {
   Account,
   CashflowForecast,
   Category,
+  CategoryProjectionPoint,
   CreditCardStatus,
+  Investment,
+  InvestmentSummary,
   MonthlySummary,
   MonthlySeriesPoint,
   NetWorthHistoryPoint,
@@ -154,6 +157,20 @@ export const useNetWorthHistory = (months = 12, params?: GroupScopedParams) =>
     },
   });
 
+export const useCategoryProjections = (months = 3, params?: GroupScopedParams) =>
+  useQuery({
+    queryKey: ["reports", "category-projections", months, params],
+    queryFn: async () => {
+      const usp = new URLSearchParams({ months: String(months) });
+      appendGroupIds(usp, params?.groupIds);
+      return (
+        await api.get<{ months: number; items: CategoryProjectionPoint[] }>(
+          `/api/reports/category-projections?${usp.toString()}`
+        )
+      ).data;
+    },
+  });
+
 export const useCashflowForecast = (days = 30, params?: GroupScopedParams) =>
   useQuery({
     queryKey: ["reports", "cashflow-forecast", days, params],
@@ -188,6 +205,18 @@ export const useGoals = () =>
   useQuery({
     queryKey: ["goals"],
     queryFn: async () => (await api.get<SavingsGoal[]>("/api/goals")).data,
+  });
+
+export const useInvestments = () =>
+  useQuery({
+    queryKey: ["investments"],
+    queryFn: async () => (await api.get<Investment[]>("/api/investments")).data,
+  });
+
+export const useInvestmentSummary = () =>
+  useQuery({
+    queryKey: ["investments", "summary"],
+    queryFn: async () => (await api.get<InvestmentSummary>("/api/investments/summary")).data,
   });
 
 export const useCreateTransaction = () => {
@@ -385,6 +414,40 @@ export const useDeleteGoal = () => {
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["goals"] });
+    },
+  });
+};
+
+export const useCreateInvestment = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: Record<string, unknown>) =>
+      (await api.post<Investment>("/api/investments", body)).data,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["investments"] });
+    },
+  });
+};
+
+export const useUpdateInvestment = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...body }: { id: string } & Record<string, unknown>) =>
+      (await api.put<Investment>(`/api/investments/${id}`, body)).data,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["investments"] });
+    },
+  });
+};
+
+export const useDeleteInvestment = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await api.delete(`/api/investments/${id}`);
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["investments"] });
     },
   });
 };

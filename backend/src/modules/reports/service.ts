@@ -33,6 +33,24 @@ const buildMonthFrames = (months: number, now = new Date()): MonthFrame[] => {
   return frames;
 };
 
+const buildCompletedMonthFrames = (months: number, now = new Date()): MonthFrame[] => {
+  const frames: MonthFrame[] = [];
+  const currentYear = now.getUTCFullYear();
+  const currentMonth = now.getUTCMonth();
+
+  for (let offset = months; offset >= 1; offset -= 1) {
+    const start = new Date(Date.UTC(currentYear, currentMonth - offset, 1));
+    frames.push({
+      year: start.getUTCFullYear(),
+      month: start.getUTCMonth() + 1,
+      label: `${start.getUTCFullYear()}-${pad(start.getUTCMonth() + 1)}`,
+      start,
+    });
+  }
+
+  return frames;
+};
+
 const dualZero = (): DualDecimal => ({ ars: new Decimal(0), usd: new Decimal(0) });
 
 const serializeDual = (amounts: DualDecimal) => ({
@@ -308,6 +326,109 @@ export const getNetWorthHistory = async (
   }
 
   return seriesDesc.reverse();
+};
+
+export const getCategoryExpenseProjections = async (
+  prisma: PrismaClient,
+  userId: string,
+  months: number,
+  groupFilter: Prisma.TransactionWhereInput | null = null,
+  isGroupScoped = false,
+  now = new Date()
+) => {
+  const frames = buildCompletedMonthFrames(months, now);
+  const firstFrame = frames[0]!;
+  const currentMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const targetStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+
+  const rows = await prisma.transaction.findMany({
+    where: {
+      ...(isGroupScoped ? {} : { userId }),
+      ...(groupFilter || {}),
+      type: "expense",
+      transactionDate: {
+        gte: firstFrame.start,
+        lt: currentMonthStart,
+      },
+    },
+    select: {
+      categoryId: true,
+      amountArs: true,
+      amountUsd: true,
+      transactionDate: true,
+    },
+  });
+
+  const byCategory = new Map<string, Map<string, DualDecimal>>();
+  for (const row of rows) {
+    const categoryKey = row.categoryId ?? "__uncategorized__";
+    const label = `${row.transactionDate.getUTCFullYear()}-${pad(row.transactionDate.getUTCMonth() + 1)}`;
+    let monthly = byCategory.get(categoryKey);
+    if (!monthly) {
+      monthly = new Map();
+      byCategory.set(categoryKey, monthly);
+    }
+    const totals = monthly.get(label) ?? dualZero();
+    totals.ars = totals.ars.plus(row.amountArs.toString());
+    totals.usd = totals.usd.plus(row.amountUsd.toString());
+    monthly.set(label, totals);
+  }
+
+  const frameLabels = frames.map((frame) => frame.label);
+
+  return Array.from(byCategory.entries())
+    .map(([categoryKey, monthly]) => {
+      const values = frameLabels.map((label) => monthly.get(label) ?? dualZero());
+      const total = values.reduce(
+        (acc, value) => ({
+          ars: acc.ars.plus(value.ars),
+          usd: acc.usd.plus(value.usd),
+        }),
+        dualZero()
+      );
+      const average = {
+        ars: total.ars.div(months),
+        usd: total.usd.div(months),
+      };
+      const variance = values.reduce(
+        (acc, value) => ({
+          ars: acc.ars.plus(value.ars.minus(average.ars).pow(2)),
+          usd: acc.usd.plus(value.usd.minus(average.usd).pow(2)),
+        }),
+        dualZero()
+      );
+      const stdDev = {
+        ars: variance.ars.div(months).sqrt(),
+        usd: variance.usd.div(months).sqrt(),
+      };
+      const volatilityRatio = average.ars.gt(0) ? stdDev.ars.div(average.ars).toNumber() : null;
+
+      return {
+        categoryId: categoryKey === "__uncategorized__" ? null : categoryKey,
+        targetYear: targetStart.getUTCFullYear(),
+        targetMonth: targetStart.getUTCMonth() + 1,
+        baselineMonths: frames.map((frame) => ({
+          year: frame.year,
+          month: frame.month,
+          label: frame.label,
+          expense: serializeDual(monthly.get(frame.label) ?? dualZero()),
+        })),
+        projected: serializeDual(average),
+        average: serializeDual(average),
+        stdDev: serializeDual(stdDev),
+        volatilityRatio,
+        confidence:
+          volatilityRatio === null
+            ? "new"
+            : volatilityRatio <= 0.25
+              ? "stable"
+              : volatilityRatio <= 0.75
+                ? "variable"
+                : "volatile",
+      };
+    })
+    .filter((item) => new Decimal(item.projected.ars).gt(0) || new Decimal(item.projected.usd).gt(0))
+    .sort((left, right) => new Decimal(right.projected.ars).minus(left.projected.ars).toNumber());
 };
 
 const getGroupScopedNetHistory = async (
