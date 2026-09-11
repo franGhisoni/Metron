@@ -1,10 +1,8 @@
 import axios, { AxiosError, type AxiosRequestConfig } from "axios";
 
-const API_BASE_URL = import.meta.env.PROD ? "https://metron-production.up.railway.app" : undefined;
-
-// Dev uses relative paths through Vite; prod bypasses the frontend /api proxy.
+// Always use same-origin /api requests. Vite proxies them locally and nginx
+// proxies them in production, avoiding browser CORS and cross-site cookie issues.
 export const api = axios.create({
-  baseURL: API_BASE_URL,
   withCredentials: true,
   timeout: 10_000,
 });
@@ -94,7 +92,7 @@ export const doRefresh = async (): Promise<RefreshResult | null> => {
 
       try {
         const res = await axios.post<RefreshResult>(
-          `${API_BASE_URL ?? ""}/api/auth/refresh`,
+          "/api/auth/refresh",
           body,
           { withCredentials: true, timeout: 10_000 }
         );

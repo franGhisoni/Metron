@@ -79,7 +79,7 @@ curl http://localhost:4000/api/rates/current  # blue/oficial/mep
 
 | Variable | Description |
 | --- | --- |
-| `VITE_API_BASE_URL` | Empty in dev (uses proxy). Full URL in production (e.g. `https://api.metron.app`) |
+| `BACKEND_URL` | Backend URL for the production nginx proxy. Use `https://api.metron.app` for a public API, or `backend:4000` when the platform provides an internal service hostname. |
 
 ## Architecture notes
 
@@ -138,14 +138,12 @@ Deploy the backend and frontend as two separate Railway services:
 2. **Frontend**
    - Source: `/frontend`
    - Build: Dockerfile (serves the built SPA from nginx).
-   - Set `VITE_API_BASE_URL` to the backend's public URL.
+   - Set `BACKEND_URL` to the backend public URL or its internal platform hostname.
 
-Because the two services live at different origins, the refresh cookie must be
-`SameSite=None; Secure` in production. That's already what the backend emits when
-`NODE_ENV=production`; just make sure both domains are HTTPS and on the same apex
-(e.g. `metron.app` + `api.metron.app`) for the cookie to flow. If they're on fully
-separate domains, you'll need to either put them behind a reverse proxy that shares
-the apex or switch to `SameSite=None` explicitly. Keep this in mind before going live.
+The browser calls the frontend's same-origin `/api` route, which nginx forwards to
+the backend. This avoids browser CORS and cross-site cookie restrictions; configure
+the backend's `CORS_ORIGIN` with the frontend's public URL anyway, so direct API
+clients remain explicitly controlled.
 
 ## What's implemented (Phase 1)
 
