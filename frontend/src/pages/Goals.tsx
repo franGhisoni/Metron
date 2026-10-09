@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { useCreateGoal, useDeleteGoal, useGoals, useUpdateGoal } from "../hooks/queries";
-import { fmtDate, fmtMoney } from "../lib/money";
+import { dateInputToIso, fmtDate, fmtMoney } from "../lib/money";
 import type { GoalStatus, SavingsGoal } from "../lib/types";
 
 const STATUSES: Array<{ value: GoalStatus; label: string }> = [
@@ -83,7 +83,7 @@ export default function GoalsPage() {
       currency: data.currency,
       currentAmount: data.currentAmount,
       status: data.status,
-      targetDate: data.targetDate ? new Date(`${data.targetDate}T12:00:00Z`).toISOString() : null,
+      targetDate: data.targetDate ? dateInputToIso(data.targetDate) : null,
     };
 
     if (editing) {

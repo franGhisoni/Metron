@@ -13,7 +13,7 @@ import {
   useUpdateTransaction,
 } from "../hooks/queries";
 import { getPreferredAmountFromDual, useCurrencyStore } from "../lib/currency";
-import { fmtDate, fmtMoney } from "../lib/money";
+import { dateInputToIso, fmtDate, fmtMoney, localDateInputValue } from "../lib/money";
 import type { Transaction } from "../lib/types";
 
 const FormSchema = z.object({
@@ -46,7 +46,7 @@ const TX_FILTER_OPTIONS: Array<{ value: TxFilterType; label: string }> = [
   { value: "transfer", label: "Transferencias" },
 ];
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = localDateInputValue;
 
 const getBaseDefaults = (): FormIn => ({
   accountId: "",
@@ -201,7 +201,7 @@ export default function TransactionsPage() {
       amount: data.amount,
       currency: data.currency,
       description: data.description?.trim() ? data.description.trim() : undefined,
-      transactionDate: new Date(data.transactionDate + "T12:00:00Z").toISOString(),
+      transactionDate: dateInputToIso(data.transactionDate),
       status: effectiveStatus,
       isRecurring: formMode === "normal" ? data.isRecurring : false,
       recurringRule:

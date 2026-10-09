@@ -12,7 +12,14 @@ import {
   useUpdateInvestment,
 } from "../hooks/queries";
 import { useCurrencyStore } from "../lib/currency";
-import { fmtDate, fmtMoney, fmtPct } from "../lib/money";
+import {
+  dateInputToIso,
+  fmtDate,
+  fmtMoney,
+  fmtPct,
+  fmtTimestampDate,
+  localDateInputValue,
+} from "../lib/money";
 import type { AssetType, Currency, Investment, InvestmentSummary } from "../lib/types";
 
 const ASSET_TYPES: Array<{ value: AssetType; label: string }> = [
@@ -51,7 +58,7 @@ const InvestmentSchema = z
 
 type InvestmentForm = z.infer<typeof InvestmentSchema>;
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = localDateInputValue;
 
 const defaultValues: InvestmentForm = {
   symbol: "",
@@ -148,7 +155,7 @@ export default function InvestmentsPage() {
       quantity: data.quantity,
       purchasePrice: data.purchasePrice,
       purchaseCurrency: data.purchaseCurrency,
-      purchaseDate: new Date(`${data.purchaseDate}T12:00:00Z`).toISOString(),
+      purchaseDate: dateInputToIso(data.purchaseDate),
       exchangeRateAtPurchase: data.exchangeRateAtPurchase || undefined,
       currentPrice: data.currentPrice || undefined,
       currentPriceCurrency: data.currentPrice ? data.currentPriceCurrency : undefined,
@@ -336,7 +343,7 @@ const InvestmentRow = ({
         <div className="mt-1 truncate text-xs text-slate-400">{investment.name}</div>
         <div className="mt-1 text-[11px] text-slate-500">
           Compra: {fmtDate(investment.purchaseDate)}
-          {investment.lastPriceUpdatedAt ? ` · Precio: ${fmtDate(investment.lastPriceUpdatedAt)}` : ""}
+          {investment.lastPriceUpdatedAt ? ` · Precio: ${fmtTimestampDate(investment.lastPriceUpdatedAt)}` : ""}
         </div>
       </div>
       <Cell label="Cantidad" value={investment.quantity} />
