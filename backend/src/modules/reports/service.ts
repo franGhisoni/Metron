@@ -233,6 +233,7 @@ export const getNetWorthHistory = async (
       amountArs: true,
       amountUsd: true,
       linkedTransactionId: true,
+      transferDirection: true,
       transactionDate: true,
     },
   });
@@ -280,6 +281,7 @@ export const getNetWorthHistory = async (
               status: row.status,
               amountArs: row.amountArs.toString(),
               amountUsd: row.amountUsd.toString(),
+              transferDirection: row.transferDirection,
             },
             {
               id: account.id,
