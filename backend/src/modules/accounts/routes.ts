@@ -46,6 +46,15 @@ const accountRoutes: FastifyPluginAsync = async (app) => {
     const owned = await assertAccountOwned(app.prisma, id, req.userId);
     if (!owned) return reply.code(404).send({ error: "not_found" });
 
+    const changesLedgerBasis =
+      (body.type !== undefined && body.type !== owned.type) ||
+      (body.currency !== undefined && body.currency !== owned.currency) ||
+      (body.balance !== undefined && !toPrismaDecimal(body.balance).equals(owned.balance));
+    if (changesLedgerBasis) {
+      const txCount = await app.prisma.transaction.count({ where: { accountId: id } });
+      if (txCount > 0) return reply.code(409).send({ error: "account_has_transactions" });
+    }
+
     const updated = await app.prisma.account.update({
       where: { id },
       data: {
@@ -197,6 +206,7 @@ const accountRoutes: FastifyPluginAsync = async (app) => {
           accountId: source.id,
           categoryId: null,
           type: "transfer",
+          transferDirection: "out",
           amountArs: toPrismaDecimal(amountArs),
           amountUsd: toPrismaDecimal(amountUsd),
           exchangeRate: toPrismaDecimal(rate),
@@ -216,6 +226,7 @@ const accountRoutes: FastifyPluginAsync = async (app) => {
           accountId: cc.id,
           categoryId: null,
           type: "transfer",
+          transferDirection: "in",
           amountArs: toPrismaDecimal(amountArs),
           amountUsd: toPrismaDecimal(amountUsd),
           exchangeRate: toPrismaDecimal(rate),

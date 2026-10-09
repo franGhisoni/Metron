@@ -46,6 +46,7 @@ export type Transaction = {
   recurringRule: RecurringRule | null;
   recurringParentId: string | null;
   linkedTransactionId: string | null;
+  transferDirection: "out" | "in" | null;
   installmentTotal: number | null;
   installmentCurrent: number | null;
   createdAt: string;

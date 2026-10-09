@@ -10,15 +10,14 @@ import {
 } from "react";
 import {
   api,
+  clearLegacyApiCache,
+  clearLegacySession,
   doRefresh,
   setAccessToken,
   setOnUnauthorized,
-  persistSession,
-  clearPersistedSession,
-  loadPersistedSession,
-  updatePersistedUser,
   type RefreshResult,
 } from "./api";
+import { queryClient } from "./queryClient";
 
 export type User = {
   id: string;
@@ -46,9 +45,13 @@ type AuthState = {
 
 const AuthContext = createContext<AuthState | null>(null);
 
-// Module-level guard: prevents React 18 StrictMode double-mount from firing
-// two concurrent refreshes.
-let _bootstrapped = false;
+const clearTransactionDraft = () => {
+  try {
+    localStorage.removeItem("metron:transactions:quick-draft");
+  } catch {
+    // Private browsing can block local storage.
+  }
+};
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -58,7 +61,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const clearAuth = useCallback(() => {
     setAccessToken(null);
     setUser(null);
-    clearPersistedSession();
+    queryClient.clear();
+    clearLegacySession();
+    clearTransactionDraft();
+    void clearLegacyApiCache();
   }, []);
 
   const refresh = useCallback(async () => {
@@ -77,28 +83,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [clearAuth]);
 
   useEffect(() => {
-    if (_bootstrapped || didBootstrap.current) return;
-    _bootstrapped = true;
+    if (didBootstrap.current) return;
     didBootstrap.current = true;
 
     (async () => {
-      // ── Fast path: restore from localStorage ────────────────────────────
-      const stored = loadPersistedSession();
-      if (stored) {
-        setAccessToken(stored.accessToken);
-        setUser(stored.user as User);
-        setLoading(false);
-
-        // Background-refresh to rotate the token. If it fails the user stays
-        // logged in until the stored access token expires, at which point the
-        // API interceptor will call clearAuth().
-        doRefresh().then((fresh) => {
-          if (fresh) setUser(fresh.user as User);
-        });
-        return;
-      }
-
-      // ── Slow path: no localStorage — try cookie or re-login ─────────────
+      clearLegacySession();
       try {
         await refresh();
       } finally {
@@ -109,9 +98,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const login = useCallback(async (email: string, password: string) => {
     const res = await api.post<RefreshResult>("/api/auth/login", { email, password });
+    queryClient.clear();
+    clearTransactionDraft();
     setAccessToken(res.data.accessToken);
     setUser(res.data.user as User);
-    persistSession(res.data);
   }, []);
 
   const register = useCallback(
@@ -121,24 +111,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         password,
         phone,
       });
+      queryClient.clear();
+      clearTransactionDraft();
       setAccessToken(res.data.accessToken);
       setUser(res.data.user as User);
-      persistSession(res.data);
     },
     []
   );
 
   const logout = useCallback(async () => {
-    _bootstrapped = false;
-    const stored = loadPersistedSession();
-    clearAuth();
     try {
-      await api.post(
-        "/api/auth/logout",
-        stored?.refreshToken ? { refreshToken: stored.refreshToken } : {}
-      );
+      await api.post("/api/auth/logout", {});
     } catch {
       // Local logout should not depend on the backend being reachable.
+    } finally {
+      clearAuth();
     }
   }, [clearAuth]);
 
@@ -150,7 +137,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }) => {
     const res = await api.patch<User>("/api/auth/me", body);
     setUser(res.data);
-    updatePersistedUser(res.data);
     return res.data;
   }, []);
 

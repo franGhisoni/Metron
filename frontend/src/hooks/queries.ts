@@ -384,6 +384,18 @@ export const useCreateAccount = () => {
   });
 };
 
+export const useUpdateAccount = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...body }: { id: string } & Record<string, unknown>) =>
+      (await api.put<Account>(`/api/accounts/${id}`, body)).data,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["accounts"] });
+      void qc.invalidateQueries({ queryKey: ["reports"] });
+    },
+  });
+};
+
 export const useCreateGoal = () => {
   const qc = useQueryClient();
   return useMutation({

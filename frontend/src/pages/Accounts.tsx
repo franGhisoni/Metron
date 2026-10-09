@@ -7,11 +7,12 @@ import {
   useCreateAccount,
   useCreditCardStatus,
   useDeleteAccount,
+  useUpdateAccount,
   usePayCreditCard,
   useRates,
 } from "../hooks/queries";
 import { convertStoredAmount, useCurrencyStore } from "../lib/currency";
-import { fmtDate, fmtMoney } from "../lib/money";
+import { dateInputToIso, fmtDate, fmtMoney, localDateInputValue } from "../lib/money";
 import type { Account } from "../lib/types";
 
 const ACCOUNT_TYPES = [
@@ -54,8 +55,11 @@ export default function AccountsPage() {
   const accountsQ = useAccounts();
   const ratesQ = useRates();
   const createAcc = useCreateAccount();
+  const updateAcc = useUpdateAccount();
   const delAcc = useDeleteAccount();
   const [showForm, setShowForm] = useState(false);
+  const [editingAccount, setEditingAccount] = useState<Account | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const { displayCurrency } = useCurrencyStore();
 
   const {
@@ -71,21 +75,41 @@ export default function AccountsPage() {
   const type = watch("type");
 
   const onSubmit = async (data: FormIn) => {
-    await createAcc.mutateAsync({
-      name: data.name,
-      type: data.type,
-      currency: data.currency,
-      balance: data.balance,
-      ...(data.type === "credit_card"
-        ? {
-            closingDay: data.closingDay,
-            dueDaysAfterClosing: data.dueDaysAfterClosing,
-            creditLimit: data.creditLimit,
-          }
-        : {}),
-    });
-    reset();
-    setShowForm(false);
+    try {
+      const cardFields = data.type === "credit_card"
+        ? { closingDay: data.closingDay, dueDaysAfterClosing: data.dueDaysAfterClosing, creditLimit: data.creditLimit }
+        : {};
+      if (editingAccount) {
+        await updateAcc.mutateAsync({ id: editingAccount.id, name: data.name, ...cardFields });
+      } else {
+        await createAcc.mutateAsync({ name: data.name, type: data.type, currency: data.currency, balance: data.balance, ...cardFields });
+      }
+      reset();
+      setEditingAccount(null);
+      setShowForm(false);
+      setError(null);
+    } catch (cause) {
+      setError(getErrorMessage(cause, "No pudimos guardar la cuenta."));
+    }
+  };
+
+  const startEdit = (account: Account) => {
+    reset({ name: account.name, type: account.type, currency: account.currency, balance: account.balance,
+      closingDay: account.closingDay ?? undefined, dueDaysAfterClosing: account.dueDaysAfterClosing ?? undefined,
+      creditLimit: account.creditLimit ?? undefined });
+    setEditingAccount(account);
+    setShowForm(true);
+    setError(null);
+  };
+
+  const deleteAccount = async (account: Account) => {
+    if (!window.confirm(`¿Eliminar la cuenta ${account.name}? Esta acción no se puede deshacer.`)) return;
+    try {
+      await delAcc.mutateAsync(account.id);
+      setError(null);
+    } catch (cause) {
+      setError(getErrorMessage(cause, "No pudimos eliminar la cuenta. Si tiene movimientos, primero hay que resolverlos."));
+    }
   };
 
   return (
@@ -93,12 +117,14 @@ export default function AccountsPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Cuentas</h1>
         <button
-          onClick={() => setShowForm((v) => !v)}
+          onClick={() => { setShowForm(!showForm); setEditingAccount(null); reset(); setError(null); }}
           className="rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800"
         >
           {showForm ? "Cancelar" : "+ Nueva"}
         </button>
       </div>
+
+      {error && <div role="alert" className="rounded-md border border-rose-800 bg-rose-950/40 p-3 text-sm text-rose-300">{error}</div>}
 
       {showForm && (
         <form
@@ -109,7 +135,7 @@ export default function AccountsPage() {
             <input {...register("name")} className={inputCls} />
           </Field>
           <Field label="Tipo">
-            <select {...register("type")} className={inputCls}>
+            <select {...register("type")} className={inputCls} disabled={!!editingAccount}>
               {ACCOUNT_TYPES.map((t) => (
                 <option key={t} value={t}>
                   {t}
@@ -118,13 +144,13 @@ export default function AccountsPage() {
             </select>
           </Field>
           <Field label="Moneda">
-            <select {...register("currency")} className={inputCls}>
+            <select {...register("currency")} className={inputCls} disabled={!!editingAccount}>
               <option>ARS</option>
               <option>USD</option>
             </select>
           </Field>
           <Field label="Saldo inicial" error={errors.balance?.message}>
-            <input {...register("balance")} className={inputCls} placeholder="0" />
+            <input {...register("balance")} className={inputCls} placeholder="0" disabled={!!editingAccount} />
           </Field>
           {type === "credit_card" && (
             <>
@@ -146,10 +172,10 @@ export default function AccountsPage() {
           <div className="sm:col-span-3">
             <button
               type="submit"
-              disabled={createAcc.isPending}
+              disabled={createAcc.isPending || updateAcc.isPending}
               className="rounded-md bg-brand-600 px-3 py-2 font-medium text-white hover:bg-brand-500 disabled:opacity-50"
             >
-              {createAcc.isPending ? "Guardando…" : "Crear cuenta"}
+              {createAcc.isPending || updateAcc.isPending ? "Guardando…" : editingAccount ? "Guardar cambios" : "Crear cuenta"}
             </button>
           </div>
         </form>
@@ -163,7 +189,8 @@ export default function AccountsPage() {
             allAccounts={accountsQ.data ?? []}
             blueRate={ratesQ.data?.rates.blue ?? null}
             displayCurrency={displayCurrency}
-            onDelete={() => void delAcc.mutate(a.id)}
+            onEdit={() => startEdit(a)}
+            onDelete={() => void deleteAccount(a)}
           />
         ))}
         {accountsQ.data?.length === 0 && (
@@ -181,12 +208,14 @@ const AccountCard = ({
   allAccounts,
   blueRate,
   displayCurrency,
+  onEdit,
   onDelete,
 }: {
   account: Account;
   allAccounts: Account[];
   blueRate: string | null;
   displayCurrency: "ARS" | "USD";
+  onEdit: () => void;
   onDelete: () => void;
 }) => {
   const ccQ = useCreditCardStatus(account.type === "credit_card" ? account.id : null);
@@ -204,9 +233,10 @@ const AccountCard = ({
           <div className="text-sm uppercase tracking-wide text-slate-400">{account.type}</div>
           <div className="text-lg font-semibold">{account.name}</div>
         </div>
-        <button onClick={onDelete} className="text-xs text-slate-500 hover:text-rose-400">
-          Eliminar
-        </button>
+        <div className="flex gap-3">
+          <button onClick={onEdit} className="text-xs text-slate-300 hover:text-white">Editar</button>
+          <button onClick={onDelete} className="text-xs text-slate-500 hover:text-rose-400">Eliminar</button>
+        </div>
       </div>
       <div className="mt-3 text-2xl font-semibold">
         {fmtMoney(displayBalance, showingConverted ? displayCurrency : account.currency)}
@@ -288,20 +318,19 @@ const PayModal = ({
   const [sourceId, setSourceId] = useState(sources[0]?.id ?? "");
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState<"ARS" | "USD">(cc.currency);
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(localDateInputValue);
   const [description, setDescription] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
     if (!sourceId || !amount) return;
-    await pay.mutateAsync({
-      ccAccountId: cc.id,
-      sourceAccountId: sourceId,
-      amount,
-      currency,
-      transactionDate: new Date(date + "T12:00:00Z").toISOString(),
-      description: description || undefined,
-    });
-    onClose();
+    try {
+      await pay.mutateAsync({ ccAccountId: cc.id, sourceAccountId: sourceId, amount, currency,
+        transactionDate: dateInputToIso(date), description: description || undefined });
+      onClose();
+    } catch (cause) {
+      setError(getErrorMessage(cause, "No pudimos registrar el pago."));
+    }
   };
 
   return (
@@ -378,6 +407,7 @@ const PayModal = ({
               />
             </label>
             <div className="flex justify-end gap-2 pt-2">
+              {error && <p role="alert" className="text-xs text-rose-400">{error}</p>}
               <button
                 onClick={onClose}
                 className="rounded-md border border-slate-700 px-3 py-2 text-sm"
@@ -417,3 +447,12 @@ const Field = ({
     {error && <span className="text-xs text-red-400">{error}</span>}
   </label>
 );
+
+function getErrorMessage(error: unknown, fallback: string) {
+  const response = (error as { response?: { data?: { error?: string; message?: string } } })?.response;
+  if (response?.data?.error === "account_has_transactions") {
+    return "Esta cuenta tiene movimientos. No se puede eliminar ni cambiar su saldo, tipo o moneda directamente.";
+  }
+  const message = response?.data?.message ?? response?.data?.error;
+  return typeof message === "string" && message.trim() ? message.replaceAll("_", " ") : fallback;
+}

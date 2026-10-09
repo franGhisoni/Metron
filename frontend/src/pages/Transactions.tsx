@@ -18,16 +18,25 @@ import type { Transaction } from "../lib/types";
 
 const FormSchema = z.object({
   accountId: z.string().min(1, "requerido"),
+  destinationAccountId: z.string().optional(),
   categoryId: z.string().optional(),
   groupIds: z.array(z.string()).default([]),
   type: z.enum(["income", "expense", "transfer"]),
-  amount: z.string().regex(/^\d+(\.\d+)?$/, "monto invalido"),
+  amount: z.string().refine((value) => /^\d+(\.\d+)?$/.test(value) && new Decimal(value).gt(0), "Ingresá un monto mayor que cero"),
   currency: z.enum(["ARS", "USD"]),
   description: z.string().optional(),
   transactionDate: z.string().min(1),
   status: z.enum(["paid", "pending", "scheduled"]),
   isRecurring: z.boolean().default(false),
   recurringRule: z.enum(["weekly", "biweekly", "monthly", "yearly"]).optional(),
+}).superRefine((data, ctx) => {
+  if (data.type === "transfer") {
+    if (!data.destinationAccountId) {
+      ctx.addIssue({ code: "custom", path: ["destinationAccountId"], message: "Elegí la cuenta destino" });
+    } else if (data.destinationAccountId === data.accountId) {
+      ctx.addIssue({ code: "custom", path: ["destinationAccountId"], message: "Elegí otra cuenta" });
+    }
+  }
 });
 
 type FormIn = z.infer<typeof FormSchema>;
@@ -36,7 +45,7 @@ type ListPreset = "month" | "all";
 type TxFilterType = "income" | "expense" | "transfer";
 type StoredQuickDraft = Pick<
   FormIn,
-  "accountId" | "categoryId" | "groupIds" | "type" | "currency" | "status"
+  "accountId" | "destinationAccountId" | "categoryId" | "groupIds" | "type" | "currency" | "status"
 >;
 
 const QUICK_DRAFT_KEY = "metron:transactions:quick-draft";
@@ -50,6 +59,7 @@ const today = localDateInputValue;
 
 const getBaseDefaults = (): FormIn => ({
   accountId: "",
+  destinationAccountId: "",
   categoryId: "",
   groupIds: [],
   type: "expense",
@@ -109,6 +119,7 @@ export default function TransactionsPage() {
   const selectedGroupIds = watch("groupIds");
   const selectedAccount = (accountsQ.data ?? []).find((account) => account.id === selectedAccountId);
   const isCcAccount = selectedAccount?.type === "credit_card";
+  const eligibleTransferAccounts = (accountsQ.data ?? []).filter((account) => account.type !== "credit_card");
   const filteredCats = (categoriesQ.data ?? []).filter(
     (category) => currentType === "transfer" || category.type === currentType
   );
@@ -134,6 +145,10 @@ export default function TransactionsPage() {
       setValue("accountId", "");
     }
   }, [accountsQ.data, accountsQ.isLoading, selectedAccountId, setValue]);
+
+  useEffect(() => {
+    if (currentType === "transfer" && isCcAccount) setValue("accountId", "");
+  }, [currentType, isCcAccount, setValue]);
 
   useEffect(() => {
     if (categoriesQ.isLoading || !selectedCategoryId) return;
@@ -183,10 +198,11 @@ export default function TransactionsPage() {
   };
 
   const onSubmit = async (data: FormIn) => {
-    const effectiveStatus = formMode === "quick" || isCcAccount ? "paid" : data.status;
+    const effectiveStatus = formMode === "quick" || isCcAccount || data.type === "transfer" ? "paid" : data.status;
     const normalizedGroupIds = dedupeIds(data.groupIds);
     const nextQuickDraft: StoredQuickDraft = {
       accountId: data.accountId,
+      destinationAccountId: data.type === "transfer" ? data.destinationAccountId : undefined,
       categoryId: data.type === "transfer" ? "" : (data.categoryId ?? ""),
       groupIds: normalizedGroupIds,
       type: data.type,
@@ -195,6 +211,7 @@ export default function TransactionsPage() {
     };
     const payload = {
       accountId: data.accountId,
+      destinationAccountId: data.type === "transfer" ? data.destinationAccountId : undefined,
       categoryId: data.type === "transfer" ? undefined : data.categoryId || undefined,
       groupIds: normalizedGroupIds,
       type: data.type,
@@ -203,9 +220,9 @@ export default function TransactionsPage() {
       description: data.description?.trim() ? data.description.trim() : undefined,
       transactionDate: dateInputToIso(data.transactionDate),
       status: effectiveStatus,
-      isRecurring: formMode === "normal" ? data.isRecurring : false,
+      isRecurring: formMode === "normal" && data.type !== "transfer" ? data.isRecurring : false,
       recurringRule:
-        formMode === "normal" && data.isRecurring ? (data.recurringRule ?? "monthly") : undefined,
+        formMode === "normal" && data.type !== "transfer" && data.isRecurring ? (data.recurringRule ?? "monthly") : undefined,
     };
 
     try {
@@ -217,7 +234,7 @@ export default function TransactionsPage() {
           ...payload,
           categoryId: data.type === "transfer" ? null : (data.categoryId || null),
           recurringRule:
-            formMode === "normal" && data.isRecurring ? (data.recurringRule ?? "monthly") : null,
+            formMode === "normal" && data.type !== "transfer" && data.isRecurring ? (data.recurringRule ?? "monthly") : null,
         });
 
         persistStoredQuickDraft(nextQuickDraft);
@@ -248,6 +265,7 @@ export default function TransactionsPage() {
   const repeatTransaction = (transaction: Transaction) => {
     const nextQuickDraft: StoredQuickDraft = {
       accountId: transaction.accountId,
+      destinationAccountId: "",
       categoryId: transaction.type === "transfer" ? "" : (transaction.categoryId ?? ""),
       groupIds: transaction.groupIds,
       type: transaction.type,
@@ -280,6 +298,7 @@ export default function TransactionsPage() {
     setFormMode(transaction.status === "paid" && !transaction.isRecurring ? "quick" : "normal");
     reset({
       accountId: transaction.accountId,
+      destinationAccountId: "",
       categoryId: transaction.categoryId ?? "",
       groupIds: transaction.groupIds,
       type: transaction.type,
@@ -299,6 +318,18 @@ export default function TransactionsPage() {
   const catMap = Object.fromEntries((categoriesQ.data ?? []).map((category) => [category.id, category]));
   const groupMap = Object.fromEntries((groupsQ.data ?? []).map((group) => [group.id, group]));
   const txItems = txQ.data?.items ?? [];
+  const deleteTransaction = async (transaction: Transaction) => {
+    const message = transaction.linkedTransactionId
+      ? "¿Eliminar las dos partes de esta transferencia o pago de tarjeta? Los saldos se corregirán."
+      : "¿Eliminar este movimiento? El saldo de la cuenta se corregirá.";
+    if (!window.confirm(message)) return;
+    try {
+      await delTx.mutateAsync(transaction.id);
+      setSubmitError(null);
+    } catch (error) {
+      setSubmitError(getErrorMessage(error, "No pudimos eliminar el movimiento."));
+    }
+  };
   const visibleTotals = summarizeVisibleTransactions(txItems);
   const mirrorCurrency = displayCurrency === "ARS" ? "USD" : "ARS";
 
@@ -361,7 +392,7 @@ export default function TransactionsPage() {
               >
                 <option value="expense">Gasto</option>
                 <option value="income">Ingreso</option>
-                <option value="transfer">Transferencia</option>
+                <option value="transfer" disabled={!!editingTransaction}>Transferencia</option>
               </select>
             </Field>
 
@@ -373,7 +404,7 @@ export default function TransactionsPage() {
                 className={selectCls}
               >
                 <option value="">-</option>
-                {(accountsQ.data ?? []).map((account) => (
+                {(currentType === "transfer" ? eligibleTransferAccounts : accountsQ.data ?? []).map((account) => (
                   <option key={account.id} value={account.id}>
                     {account.name} ({account.currency})
                   </option>
@@ -381,22 +412,25 @@ export default function TransactionsPage() {
               </select>
             </Field>
 
-            <Field label="Categoria">
-              <select
-                {...register("categoryId", {
-                  onChange: () => setPrefillNote(null),
-                })}
-                className={selectCls}
-                disabled={currentType === "transfer"}
-              >
-                <option value="">-</option>
-                {filteredCats.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.icon} {category.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
+            {currentType === "transfer" ? (
+              <Field label="Cuenta destino" error={errors.destinationAccountId?.message}>
+                <select {...register("destinationAccountId")} className={selectCls}>
+                  <option value="">Elegí una cuenta</option>
+                  {eligibleTransferAccounts.filter((account) => account.id !== selectedAccountId).map((account) => (
+                    <option key={account.id} value={account.id}>{account.name} ({account.currency})</option>
+                  ))}
+                </select>
+              </Field>
+            ) : (
+              <Field label="Categoria">
+                <select {...register("categoryId", { onChange: () => setPrefillNote(null) })} className={selectCls}>
+                  <option value="">-</option>
+                  {filteredCats.map((category) => (
+                    <option key={category.id} value={category.id}>{category.icon} {category.name}</option>
+                  ))}
+                </select>
+              </Field>
+            )}
 
             <Field label="Fecha" error={errors.transactionDate?.message}>
               <input type="date" {...register("transactionDate")} className={inputCls} />
@@ -452,7 +486,11 @@ export default function TransactionsPage() {
             />
           </Field>
 
-          {formMode === "normal" && (
+          {currentType === "transfer" && (
+            <p className="text-xs text-slate-400">La salida y la entrada se registran juntas. Si las cuentas usan monedas distintas, se aplica el dólar blue vigente.</p>
+          )}
+
+          {formMode === "normal" && currentType !== "transfer" && (
             <div className="grid gap-3 border-t border-slate-800 pt-4 sm:grid-cols-2 lg:grid-cols-4">
               {!isCcAccount && (
                 <Field label="Estado">
@@ -736,7 +774,7 @@ export default function TransactionsPage() {
                       ? "-"
                       : transaction.type === "income"
                         ? "+"
-                        : "";
+                        : transaction.transferDirection === "out" ? "-" : transaction.transferDirection === "in" ? "+" : "";
                   const displayAmount = getPreferredAmountFromDual(
                     { ars: transaction.amountArs, usd: transaction.amountUsd },
                     displayCurrency
@@ -793,9 +831,9 @@ export default function TransactionsPage() {
                       <td
                         className={
                           "px-3 py-2 text-right font-medium " +
-                          (transaction.type === "expense"
+                          (transaction.type === "expense" || transaction.transferDirection === "out"
                             ? "text-rose-400"
-                            : transaction.type === "income"
+                            : transaction.type === "income" || transaction.transferDirection === "in"
                               ? "text-emerald-400"
                               : "text-slate-200")
                         }
@@ -814,23 +852,15 @@ export default function TransactionsPage() {
                       </td>
                       <td className="px-3 py-2 text-right">
                         <div className="flex justify-end gap-3">
+                          {transaction.type !== "transfer" && (
+                            <>
+                              <button type="button" onClick={() => editTransaction(transaction)} className="text-xs text-slate-300 hover:text-white">Editar</button>
+                              <button type="button" onClick={() => repeatTransaction(transaction)} className="text-xs text-slate-400 hover:text-brand-300">Repetir</button>
+                            </>
+                          )}
                           <button
                             type="button"
-                            onClick={() => editTransaction(transaction)}
-                            className="text-xs text-slate-300 hover:text-white"
-                          >
-                            Editar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => repeatTransaction(transaction)}
-                            className="text-xs text-slate-400 hover:text-brand-300"
-                          >
-                            Repetir
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void delTx.mutate(transaction.id)}
+                            onClick={() => void deleteTransaction(transaction)}
                             className="text-xs text-slate-500 hover:text-rose-400"
                           >
                             Eliminar

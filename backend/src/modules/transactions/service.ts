@@ -24,6 +24,7 @@ export const serializeTransaction = (t: TransactionWithGroups) => ({
   recurringRule: t.recurringRule,
   recurringParentId: t.recurringParentId,
   linkedTransactionId: t.linkedTransactionId,
+  transferDirection: t.transferDirection,
   installmentTotal: t.installmentTotal,
   installmentCurrent: t.installmentCurrent,
   createdAt: t.createdAt.toISOString(),

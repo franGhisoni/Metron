@@ -1,9 +1,13 @@
 import { z } from "zod";
+import Decimal from "decimal.js";
 
 const DecimalString = z
   .union([z.string(), z.number()])
   .transform((v) => String(v))
   .refine((v) => /^-?\d+(\.\d+)?$/.test(v), { message: "invalid_decimal" });
+const PositiveDecimalString = DecimalString.refine((v) => /^\d+(\.\d+)?$/.test(v) && new Decimal(v).gt(0), {
+  message: "amount_must_be_positive",
+});
 
 export const TX_TYPES = ["income", "expense", "transfer"] as const;
 export const TX_STATUSES = ["paid", "pending", "scheduled"] as const;
@@ -34,10 +38,11 @@ const QueryTxTypeList = z.preprocess(splitQueryList, z.array(z.enum(TX_TYPES)).o
 
 export const CreateTransactionBody = z.object({
   accountId: z.string().min(1),
+  destinationAccountId: z.string().min(1).optional(),
   categoryId: z.string().min(1).optional(),
   groupIds: GroupIds.optional(),
   type: z.enum(TX_TYPES),
-  amount: DecimalString,
+  amount: PositiveDecimalString,
   currency: z.enum(CURRENCIES),
   description: z.string().trim().max(500).optional(),
   paymentMethod: z.string().trim().max(80).optional(),
@@ -51,6 +56,20 @@ export const CreateTransactionBody = z.object({
   // Optional: caller can override the exchange rate (e.g. historical import).
   // Otherwise we fetch the latest "blue" rate at creation time.
   exchangeRate: DecimalString.optional(),
+}).superRefine((data, ctx) => {
+  if (data.type === "transfer") {
+    if (!data.destinationAccountId) {
+      ctx.addIssue({ code: "custom", path: ["destinationAccountId"], message: "destination_required" });
+    } else if (data.destinationAccountId === data.accountId) {
+      ctx.addIssue({ code: "custom", path: ["destinationAccountId"], message: "same_account" });
+    }
+    if (data.status !== "paid" || data.isRecurring || data.categoryId || data.dueDate ||
+        data.recurringRule || data.installmentTotal || data.installmentCurrent || data.paymentMethod) {
+      ctx.addIssue({ code: "custom", path: ["type"], message: "invalid_transfer_options" });
+    }
+  } else if (data.destinationAccountId) {
+    ctx.addIssue({ code: "custom", path: ["destinationAccountId"], message: "destination_only_for_transfer" });
+  }
 });
 export type CreateTransactionBody = z.infer<typeof CreateTransactionBody>;
 
@@ -59,7 +78,7 @@ export const UpdateTransactionBody = z.object({
   categoryId: z.string().min(1).nullable().optional(),
   groupIds: GroupIds.optional(),
   type: z.enum(TX_TYPES).optional(),
-  amount: DecimalString.optional(),
+  amount: PositiveDecimalString.optional(),
   currency: z.enum(CURRENCIES).optional(),
   description: z.string().trim().max(500).optional(),
   paymentMethod: z.string().trim().max(80).optional(),

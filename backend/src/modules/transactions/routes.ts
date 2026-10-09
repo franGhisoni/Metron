@@ -116,6 +116,91 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
     const rate = body.exchangeRate ?? (await getCurrentRate(app.prisma, app.redis, "blue"));
     const { amountArs, amountUsd } = computeDualAmounts(body.amount, body.currency, rate);
 
+    if (body.type === "transfer") {
+      const destination = await assertAccountOwned(
+        app.prisma,
+        body.destinationAccountId!,
+        req.userId
+      );
+      if (!destination) return reply.code(404).send({ error: "destination_not_found" });
+      if (account.type === "credit_card" || destination.type === "credit_card") {
+        return reply.code(400).send({ error: "use_card_payment_for_credit_cards" });
+      }
+
+      const transferDate = new Date(body.transactionDate);
+      const transferAmounts = {
+        amountArs: toPrismaDecimal(amountArs),
+        amountUsd: toPrismaDecimal(amountUsd),
+        exchangeRate: toPrismaDecimal(rate),
+        currency: body.currency,
+        transactionDate: transferDate,
+        dueDate: null,
+        status: "paid" as const,
+        isRecurring: false,
+        recurringRule: null,
+      };
+
+      const created = await app.prisma.$transaction(async (tx) => {
+        const outgoing = await tx.transaction.create({
+          data: {
+            ...transferAmounts,
+            userId: req.userId,
+            accountId: account.id,
+            type: "transfer",
+            transferDirection: "out",
+            description: body.description || `Transferencia a ${destination.name}`,
+            categoryId: null,
+          },
+        });
+        const incoming = await tx.transaction.create({
+          data: {
+            ...transferAmounts,
+            userId: req.userId,
+            accountId: destination.id,
+            type: "transfer",
+            transferDirection: "in",
+            linkedTransactionId: outgoing.id,
+            description: body.description || `Transferencia desde ${account.name}`,
+            categoryId: null,
+          },
+        });
+        await tx.transaction.update({
+          where: { id: outgoing.id },
+          data: { linkedTransactionId: incoming.id },
+        });
+        if (groupIds.length) {
+          await tx.transactionGroupAssignment.createMany({
+            data: [outgoing.id, incoming.id].flatMap((transactionId) =>
+              groupIds.map((groupId) => ({ transactionId, groupId }))
+            ),
+          });
+        }
+
+        await applyBalanceDelta(
+          tx,
+          account.id,
+          getBalanceDelta(
+            { type: "transfer", status: "paid", amountArs, amountUsd, transferDirection: "out" },
+            { id: account.id, currency: account.currency as "ARS" | "USD", type: account.type }
+          )
+        );
+        await applyBalanceDelta(
+          tx,
+          destination.id,
+          getBalanceDelta(
+            { type: "transfer", status: "paid", amountArs, amountUsd, transferDirection: "in" },
+            { id: destination.id, currency: destination.currency as "ARS" | "USD", type: destination.type }
+          )
+        );
+
+        return tx.transaction.findUniqueOrThrow({
+          where: { id: outgoing.id },
+          include: { groupLinks: { select: { groupId: true } } },
+        });
+      });
+      return reply.code(201).send(serializeTransaction(created));
+    }
+
     // Credit-card transactions are always paid: the purchase already happened.
     const effectiveStatus = account.type === "credit_card" ? "paid" : body.status;
     const balanceDelta = getBalanceDelta(
@@ -198,6 +283,9 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
       },
     });
     if (!existing) return reply.code(404).send({ error: "not_found" });
+    if (existing.type === "transfer" || body.type === "transfer") {
+      return reply.code(409).send({ error: "transfer_requires_recreation" });
+    }
 
     if (body.categoryId) {
       const cat = await app.prisma.category.findFirst({
@@ -368,13 +456,14 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
     });
     if (!existing) return reply.code(404).send({ error: "not_found" });
 
-    let linkedCounterpartAccountType: string | null = null;
-    if (existing.linkedTransactionId) {
-      const linked = await app.prisma.transaction.findUnique({
-        where: { id: existing.linkedTransactionId },
-        select: { account: { select: { type: true } } },
-      });
-      linkedCounterpartAccountType = linked?.account.type ?? null;
+    const linked = existing.linkedTransactionId
+      ? await app.prisma.transaction.findFirst({
+        where: { id: existing.linkedTransactionId, userId: req.userId },
+        include: { account: { select: { id: true, type: true, currency: true } } },
+      })
+      : null;
+    if (existing.linkedTransactionId && (!linked || linked.linkedTransactionId !== id)) {
+      return reply.code(409).send({ error: "linked_transfer_incomplete" });
     }
 
     const previousDelta = getBalanceDelta(
@@ -383,18 +472,42 @@ const transactionRoutes: FastifyPluginAsync = async (app) => {
         status: existing.status,
         amountArs: existing.amountArs.toString(),
         amountUsd: existing.amountUsd.toString(),
+        transferDirection: existing.transferDirection,
       },
       {
         id: existing.account.id,
         currency: existing.account.currency as "ARS" | "USD",
         type: existing.account.type,
       },
-      linkedCounterpartAccountType
+      linked?.account.type ?? null
     );
 
+    const linkedDelta = linked
+      ? getBalanceDelta(
+          {
+            type: linked.type,
+            status: linked.status,
+            amountArs: linked.amountArs.toString(),
+            amountUsd: linked.amountUsd.toString(),
+            transferDirection: linked.transferDirection,
+          },
+          {
+            id: linked.account.id,
+            currency: linked.account.currency as "ARS" | "USD",
+            type: linked.account.type,
+          },
+          existing.account.type
+        )
+      : null;
+
     await app.prisma.$transaction(async (tx) => {
-      await tx.transaction.delete({ where: { id } });
+      await tx.transaction.deleteMany({
+        where: { id: { in: linked ? [id, linked.id] : [id] }, userId: req.userId },
+      });
       await applyBalanceDelta(tx, existing.account.id, previousDelta?.negated() ?? null);
+      if (linked) {
+        await applyBalanceDelta(tx, linked.account.id, linkedDelta?.negated() ?? null);
+      }
     });
 
     return reply.code(204).send();

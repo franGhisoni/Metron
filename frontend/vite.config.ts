@@ -33,18 +33,6 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg}"],
-        runtimeCaching: [
-          {
-            urlPattern: /^\/api\//,
-            handler: "NetworkFirst",
-            options: {
-              cacheName: "metron-api",
-              networkTimeoutSeconds: 4,
-              expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 7 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-        ],
       },
       devOptions: { enabled: false },
     }),

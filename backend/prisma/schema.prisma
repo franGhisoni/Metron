@@ -30,6 +30,11 @@ enum TxStatus {
   scheduled
 }
 
+enum TransferDirection {
+  out
+  in
+}
+
 model User {
   id                      String   @id @default(cuid())
   email                   String   @unique
@@ -103,6 +108,7 @@ model Transaction {
   recurringRule      String?
   recurringParentId  String?
   linkedTransactionId String?
+  transferDirection  TransferDirection?
   installmentTotal   Int?
   installmentCurrent Int?
   createdAt          DateTime @default(now())

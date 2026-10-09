@@ -38,15 +38,11 @@ const serializeUser = (user: {
   liquidityAlertThreshold: user.liquidityAlertThreshold?.toString() ?? null,
 });
 
-// Extract a refresh token from the request body (localStorage flow) or the
-// signed httpOnly cookie (fallback). Returns the raw JWT string or null.
+// Refresh tokens are only accepted from the signed httpOnly cookie.
 const extractRefreshToken = (
   cookies: Record<string, string | undefined>,
-  unsignCookie: (value: string) => { valid: boolean; value: string | null },
-  body: { refreshToken?: string } | null
+  unsignCookie: (value: string) => { valid: boolean; value: string | null }
 ): string | null => {
-  if (body?.refreshToken) return body.refreshToken;
-
   const raw = cookies[REFRESH_COOKIE];
   if (!raw) return null;
   const unsigned = unsignCookie(raw);
@@ -78,7 +74,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
     await persistRefreshToken(app.prisma, user.id, refreshToken, jti);
 
     reply.setCookie(REFRESH_COOKIE, refreshToken, refreshCookieOptions());
-    return reply.code(201).send({ user: serializeUser(user), accessToken, refreshToken });
+    return reply.code(201).send({ user: serializeUser(user), accessToken });
   });
 
   app.post("/login", async (req, reply) => {
@@ -99,14 +95,13 @@ const authRoutes: FastifyPluginAsync = async (app) => {
     return reply.send({
       user: serializeUser(user),
       accessToken,
-      refreshToken,
     });
   });
 
   app.post("/refresh", async (req, reply) => {
-    const tokenValue = extractRefreshToken(req.cookies, req.unsignCookie, req.body as { refreshToken?: string } | null);
+    const tokenValue = extractRefreshToken(req.cookies, req.unsignCookie);
     if (!tokenValue) {
-      req.log.warn({ cookies: Object.keys(req.cookies) }, "refresh: no token in body or cookie");
+      req.log.warn("refresh: no valid cookie");
       return reply.code(401).send({ error: "missing_refresh_token" });
     }
 
@@ -136,15 +131,11 @@ const authRoutes: FastifyPluginAsync = async (app) => {
     await persistRefreshToken(app.prisma, user.id, newRefresh, newJti);
 
     reply.setCookie(REFRESH_COOKIE, newRefresh, refreshCookieOptions());
-    return reply.send({ user: serializeUser(user), accessToken, refreshToken: newRefresh });
+    return reply.send({ user: serializeUser(user), accessToken });
   });
 
   app.post("/logout", async (req, reply) => {
-    const tokenValue = extractRefreshToken(
-      req.cookies,
-      req.unsignCookie,
-      req.body as { refreshToken?: string } | null
-    );
+    const tokenValue = extractRefreshToken(req.cookies, req.unsignCookie);
     if (tokenValue) {
       try {
         const payload = app.verifyRefreshToken(tokenValue);

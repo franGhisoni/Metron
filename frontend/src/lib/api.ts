@@ -21,7 +21,6 @@ export const setOnUnauthorized = (cb: () => void) => {
 // Shape returned by /login, /register, and /refresh
 export type RefreshResult = {
   accessToken: string;
-  refreshToken: string;
   user: {
     id: string;
     email: string;
@@ -32,52 +31,21 @@ export type RefreshResult = {
   };
 };
 
-// ── localStorage session persistence ────────────────────────────────────────
-const SESSION_KEY = "metron:session";
-type StoredSession = RefreshResult & { expiresAt: number };
-
-export const persistSession = (data: RefreshResult, ttlMs = 14 * 24 * 60 * 60 * 1000) => {
+export const clearLegacySession = () => {
   try {
-    const session: StoredSession = { ...data, expiresAt: Date.now() + ttlMs };
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    localStorage.removeItem("metron:session");
   } catch {
-    // Private-browsing mode or storage quota exceeded — silently skip.
+    // Storage can be unavailable in private browsing.
   }
 };
 
-export const loadPersistedSession = (): (RefreshResult & { expiresAt: number }) | null => {
+export const clearLegacyApiCache = async () => {
   try {
-    const raw = localStorage.getItem(SESSION_KEY);
-    if (!raw) return null;
-    const session: StoredSession = JSON.parse(raw);
-    if (session.expiresAt < Date.now()) {
-      localStorage.removeItem(SESSION_KEY);
-      return null;
-    }
-    return session;
+    if ("caches" in window) await caches.delete("metron-api");
   } catch {
-    return null;
+    // Cache Storage can be unavailable; API requests still use the network.
   }
 };
-
-export const clearPersistedSession = () => {
-  try {
-    localStorage.removeItem(SESSION_KEY);
-  } catch {
-    // ignore
-  }
-};
-
-export const updatePersistedUser = (user: RefreshResult["user"]) => {
-  try {
-    const stored = loadPersistedSession();
-    if (!stored) return;
-    persistSession({ ...stored, user });
-  } catch {
-    // ignore
-  }
-};
-// ────────────────────────────────────────────────────────────────────────────
 
 // Single in-flight promise so concurrent callers share one HTTP request
 let refreshPromise: Promise<RefreshResult | null> | null = null;
@@ -85,19 +53,13 @@ let refreshPromise: Promise<RefreshResult | null> | null = null;
 export const doRefresh = async (): Promise<RefreshResult | null> => {
   if (!refreshPromise) {
     refreshPromise = (async () => {
-      // Prefer the refresh token stored in localStorage (works regardless of
-      // cookie configuration). Fall back to httpOnly cookie if not available.
-      const stored = loadPersistedSession();
-      const body = stored?.refreshToken ? { refreshToken: stored.refreshToken } : {};
-
       try {
         const res = await axios.post<RefreshResult>(
           "/api/auth/refresh",
-          body,
+          {},
           { withCredentials: true, timeout: 10_000 }
         );
         accessToken = res.data.accessToken;
-        persistSession(res.data);
         return res.data;
       } catch (err) {
         accessToken = null;

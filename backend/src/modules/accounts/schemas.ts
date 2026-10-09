@@ -1,4 +1,5 @@
 import { z } from "zod";
+import Decimal from "decimal.js";
 
 export const ACCOUNT_TYPES = [
   "checking",
@@ -16,6 +17,9 @@ const DecimalString = z
   .union([z.string(), z.number()])
   .transform((v) => String(v))
   .refine((v) => /^-?\d+(\.\d+)?$/.test(v), { message: "invalid_decimal" });
+const PositiveDecimalString = DecimalString.refine((v) => /^\d+(\.\d+)?$/.test(v) && new Decimal(v).gt(0), {
+  message: "amount_must_be_positive",
+});
 
 const CreateAccountBase = z.object({
   name: z.string().trim().min(1).max(80),
@@ -50,7 +54,7 @@ export const AccountIdParam = z.object({ id: z.string().min(1) });
 
 export const PayCreditCardBody = z.object({
   sourceAccountId: z.string().min(1),
-  amount: DecimalString,
+  amount: PositiveDecimalString,
   currency: z.enum(CURRENCIES),
   transactionDate: z.string().datetime(),
   description: z.string().trim().max(500).optional(),

@@ -5,9 +5,10 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { queryClient } from "./lib/queryClient";
 import { AuthProvider } from "./lib/auth";
+import { clearLegacyApiCache } from "./lib/api";
 import "./index.css";
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
+const renderApp = () => ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
@@ -18,3 +19,5 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </QueryClientProvider>
   </React.StrictMode>
 );
+
+void clearLegacyApiCache().then(renderApp);

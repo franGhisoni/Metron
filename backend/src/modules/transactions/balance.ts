@@ -6,6 +6,7 @@ export type BalanceAwareTx = {
   status: "paid" | "pending" | "scheduled";
   amountArs: string;
   amountUsd: string;
+  transferDirection?: "out" | "in" | null;
 };
 
 export type BalanceAwareAccount = {
@@ -26,8 +27,11 @@ export const getBalanceDelta = (
   if (tx.type === "income") return amount;
   if (tx.type === "expense") return amount.negated();
 
-  // Credit-card payments are represented as linked transfer pairs:
-  // the non-card side reduces the source account balance.
+  if (tx.type === "transfer" && tx.transferDirection === "out") return amount.negated();
+  if (tx.type === "transfer" && tx.transferDirection === "in") return amount;
+
+  // Legacy card payments have no direction marker. Their non-card side
+  // reduces the source account balance.
   if (tx.type === "transfer" && linkedCounterpartAccountType === "credit_card") {
     return amount.negated();
   }
