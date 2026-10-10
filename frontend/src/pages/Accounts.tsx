@@ -177,7 +177,7 @@ export default function AccountsPage() {
                   <option value={1}>El mes siguiente</option>
                 </select>
               </Field>
-              <p className="sm:col-span-3 text-xs text-slate-400">Se repetirá todos los meses. Si el mes es más corto, se usará su último día. El banco puede mover fechas por feriados; verificá el resumen cuando eso ocurra.</p>
+              <p className="sm:col-span-3 text-xs text-slate-400">Se repetirá todos los meses. Si el mes es más corto, se usará su último día; si eso hace coincidir cierre y vencimiento, vencerá al día siguiente. El banco puede mover fechas por feriados; verificá el resumen cuando eso ocurra.</p>
               <Field label="Límite de crédito" error={errors.creditLimit?.message}>
                 <input {...register("creditLimit")} className={inputCls} />
               </Field>

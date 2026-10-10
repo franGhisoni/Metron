@@ -42,6 +42,10 @@ test("same-month due dates and year boundaries remain stable", () => {
   const yearEnd = computeCreditCardStatus(25, fixed(10, 1), new Date("2026-12-26T12:00:00Z"));
   assert.equal(isoDay(yearEnd.currentDueDate), "2027-01-10");
   assert.equal(isoDay(yearEnd.nextDueDate), "2027-02-10");
+
+  const shortMonth = computeCreditCardStatus(28, fixed(30, 0), new Date("2027-02-25T12:00:00Z"));
+  assert.equal(isoDay(shortMonth.currentCloseDate), "2027-02-28");
+  assert.equal(isoDay(shortMonth.currentDueDate), "2027-03-01");
 });
 
 test("the current day follows Argentina time around UTC midnight", () => {

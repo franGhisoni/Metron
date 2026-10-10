@@ -30,9 +30,10 @@ const dateInMonth = (year: number, monthIndex: number, day: number): Date => {
 
 const cycle = (year: number, monthIndex: number, closingDay: number, rule: DueRule) => {
   const close = dateInMonth(year, monthIndex, closingDay);
-  const due = rule.dueDay !== null && rule.dueMonthOffset !== null
+  let due = rule.dueDay !== null && rule.dueMonthOffset !== null
     ? dateInMonth(year, monthIndex + rule.dueMonthOffset, rule.dueDay)
     : addDaysUTC(close, rule.dueDaysAfterClosing ?? 0);
+  if (rule.dueMonthOffset === 0 && due <= close) due = addDaysUTC(close, 1);
   return { close, due };
 };
 
