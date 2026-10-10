@@ -5,6 +5,15 @@
 export const startOfUtcDay = (d: Date): Date =>
   new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 
+export const argentinaCalendarDay = (now = new Date()): Date => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(now);
+  const value = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+  return new Date(Date.UTC(value("year"), value("month") - 1, value("day")));
+};
+
 export const daysInMonthUTC = (year: number, monthIndex: number): number =>
   new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
 

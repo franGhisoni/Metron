@@ -10,6 +10,7 @@ import { assignStatement, computeCreditCardStatus } from "./creditCard.js";
 import { toPrismaDecimal, serializeDecimal, Decimal } from "../../lib/decimal.js";
 import { getCurrentRate } from "../rates/service.js";
 import { computeDualAmounts, serializeTransaction } from "../transactions/service.js";
+import { argentinaCalendarDay } from "../../lib/dates.js";
 
 const accountRoutes: FastifyPluginAsync = async (app) => {
   app.addHook("onRequest", app.authenticate);
@@ -33,6 +34,8 @@ const accountRoutes: FastifyPluginAsync = async (app) => {
         balance: toPrismaDecimal(body.balance),
         closingDay: body.closingDay ?? null,
         dueDaysAfterClosing: body.dueDaysAfterClosing ?? null,
+        dueDay: body.dueDay ?? null,
+        dueMonthOffset: body.dueMonthOffset ?? null,
         creditLimit: body.creditLimit ? toPrismaDecimal(body.creditLimit) : null,
       },
     });
@@ -45,6 +48,17 @@ const accountRoutes: FastifyPluginAsync = async (app) => {
 
     const owned = await assertAccountOwned(app.prisma, id, req.userId);
     if (!owned) return reply.code(404).send({ error: "not_found" });
+
+    const nextClosingDay = body.closingDay ?? owned.closingDay;
+    const nextDueDay = body.dueDay ?? owned.dueDay;
+    const nextDueMonthOffset = body.dueMonthOffset ?? owned.dueMonthOffset;
+    if (owned.type === "credit_card" && (nextDueDay == null) !== (nextDueMonthOffset == null)) {
+      return reply.code(400).send({ error: "incomplete_due_rule" });
+    }
+    if (owned.type === "credit_card" && nextDueDay != null && nextDueMonthOffset != null &&
+        nextClosingDay != null && nextDueMonthOffset === 0 && nextDueDay <= nextClosingDay) {
+      return reply.code(400).send({ error: "due_must_follow_close" });
+    }
 
     const changesLedgerBasis =
       (body.type !== undefined && body.type !== owned.type) ||
@@ -66,6 +80,8 @@ const accountRoutes: FastifyPluginAsync = async (app) => {
         ...(body.dueDaysAfterClosing !== undefined
           ? { dueDaysAfterClosing: body.dueDaysAfterClosing }
           : {}),
+        ...(body.dueDay !== undefined ? { dueDay: body.dueDay } : {}),
+        ...(body.dueMonthOffset !== undefined ? { dueMonthOffset: body.dueMonthOffset } : {}),
         ...(body.creditLimit !== undefined
           ? { creditLimit: toPrismaDecimal(body.creditLimit) }
           : {}),
@@ -94,12 +110,17 @@ const accountRoutes: FastifyPluginAsync = async (app) => {
     const { id } = AccountIdParam.parse(req.params);
     const acc = await assertAccountOwned(app.prisma, id, req.userId);
     if (!acc) return reply.code(404).send({ error: "not_found" });
-    if (acc.type !== "credit_card" || acc.closingDay == null || acc.dueDaysAfterClosing == null) {
+    if (acc.type !== "credit_card" || acc.closingDay == null ||
+        (acc.dueDay == null && acc.dueDaysAfterClosing == null)) {
       return reply.code(400).send({ error: "not_a_credit_card" });
     }
 
-    const today = new Date();
-    const status = computeCreditCardStatus(acc.closingDay, acc.dueDaysAfterClosing, today);
+    const today = argentinaCalendarDay();
+    const status = computeCreditCardStatus(acc.closingDay, {
+      dueDay: acc.dueDay,
+      dueMonthOffset: acc.dueMonthOffset,
+      dueDaysAfterClosing: acc.dueDaysAfterClosing,
+    }, today);
 
     // Statement = charges (expenses) minus payments (incoming transfers).
     // Breakdown by ORIGINAL currency of each tx (not converted) — a card can carry
@@ -127,7 +148,8 @@ const accountRoutes: FastifyPluginAsync = async (app) => {
     let currentInCardCurrency = new Decimal(0);
 
     for (const tx of txs) {
-      const bucket = assignStatement(tx.transactionDate, today, acc.closingDay);
+      const bucket = assignStatement(tx.transactionDate, status, tx.type === "transfer");
+      if (!bucket) continue;
       const sign = tx.type === "expense" ? 1 : -1;
       const isArs = tx.currency === "ARS";
       const originalAmount = new Decimal((isArs ? tx.amountArs : tx.amountUsd).toString()).mul(sign);

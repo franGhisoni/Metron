@@ -28,6 +28,8 @@ const CreateAccountBase = z.object({
   balance: DecimalString.default("0"),
   closingDay: z.number().int().min(1).max(31).optional(),
   dueDaysAfterClosing: z.number().int().min(0).max(60).optional(),
+  dueDay: z.number().int().min(1).max(31).optional(),
+  dueMonthOffset: z.number().int().min(0).max(1).optional(),
   creditLimit: DecimalString.optional(),
 });
 
@@ -35,12 +37,17 @@ export const CreateAccountBody = CreateAccountBase.superRefine((data, ctx) => {
   if (data.type === "credit_card") {
     if (data.closingDay === undefined)
       ctx.addIssue({ code: "custom", path: ["closingDay"], message: "required_for_credit_card" });
-    if (data.dueDaysAfterClosing === undefined)
+    if (data.dueDay === undefined)
       ctx.addIssue({
         code: "custom",
-        path: ["dueDaysAfterClosing"],
+        path: ["dueDay"],
         message: "required_for_credit_card",
       });
+    if (data.dueMonthOffset === undefined)
+      ctx.addIssue({ code: "custom", path: ["dueMonthOffset"], message: "required_for_credit_card" });
+    if (data.dueMonthOffset === 0 && data.dueDay !== undefined &&
+        data.closingDay !== undefined && data.dueDay <= data.closingDay)
+      ctx.addIssue({ code: "custom", path: ["dueDay"], message: "due_must_follow_close" });
     if (data.creditLimit === undefined)
       ctx.addIssue({ code: "custom", path: ["creditLimit"], message: "required_for_credit_card" });
   }

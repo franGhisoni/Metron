@@ -9,6 +9,8 @@ export const serializeAccount = (a: Account) => ({
   balance: serializeDecimal(a.balance) ?? "0",
   closingDay: a.closingDay,
   dueDaysAfterClosing: a.dueDaysAfterClosing,
+  dueDay: a.dueDay,
+  dueMonthOffset: a.dueMonthOffset,
   creditLimit: serializeDecimal(a.creditLimit),
   createdAt: a.createdAt.toISOString(),
   updatedAt: a.updatedAt.toISOString(),

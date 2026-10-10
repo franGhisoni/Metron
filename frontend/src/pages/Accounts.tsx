@@ -32,19 +32,25 @@ const FormSchema = z
     currency: z.enum(["ARS", "USD"]),
     balance: z.string().regex(/^-?\d+(\.\d+)?$/, "inválido").default("0"),
     closingDay: z.coerce.number().int().min(1).max(31).optional(),
-    dueDaysAfterClosing: z.coerce.number().int().min(0).max(60).optional(),
+    dueDay: z.coerce.number().int().min(1).max(31).optional(),
+    dueMonthOffset: z.coerce.number().int().min(0).max(1).optional(),
     creditLimit: z.string().regex(/^\d+(\.\d+)?$/, "inválido").optional(),
   })
   .superRefine((data, ctx) => {
     if (data.type === "credit_card") {
       if (!data.closingDay)
         ctx.addIssue({ code: "custom", path: ["closingDay"], message: "requerido" });
-      if (data.dueDaysAfterClosing === undefined)
+      if (!data.dueDay)
         ctx.addIssue({
           code: "custom",
-          path: ["dueDaysAfterClosing"],
+          path: ["dueDay"],
           message: "requerido",
         });
+      if (data.dueMonthOffset === undefined)
+        ctx.addIssue({ code: "custom", path: ["dueMonthOffset"], message: "requerido" });
+      if (data.dueMonthOffset === 0 && data.dueDay !== undefined &&
+          data.closingDay !== undefined && data.dueDay <= data.closingDay)
+        ctx.addIssue({ code: "custom", path: ["dueDay"], message: "El vencimiento debe ser posterior al cierre" });
       if (!data.creditLimit)
         ctx.addIssue({ code: "custom", path: ["creditLimit"], message: "requerido" });
     }
@@ -70,14 +76,14 @@ export default function AccountsPage() {
     formState: { errors },
   } = useForm<FormIn>({
     resolver: zodResolver(FormSchema),
-    defaultValues: { type: "checking", currency: "ARS", balance: "0" },
+    defaultValues: { type: "checking", currency: "ARS", balance: "0", dueMonthOffset: 1 },
   });
   const type = watch("type");
 
   const onSubmit = async (data: FormIn) => {
     try {
       const cardFields = data.type === "credit_card"
-        ? { closingDay: data.closingDay, dueDaysAfterClosing: data.dueDaysAfterClosing, creditLimit: data.creditLimit }
+        ? { closingDay: data.closingDay, dueDay: data.dueDay, dueMonthOffset: data.dueMonthOffset, creditLimit: data.creditLimit }
         : {};
       if (editingAccount) {
         await updateAcc.mutateAsync({ id: editingAccount.id, name: data.name, ...cardFields });
@@ -95,7 +101,8 @@ export default function AccountsPage() {
 
   const startEdit = (account: Account) => {
     reset({ name: account.name, type: account.type, currency: account.currency, balance: account.balance,
-      closingDay: account.closingDay ?? undefined, dueDaysAfterClosing: account.dueDaysAfterClosing ?? undefined,
+      closingDay: account.closingDay ?? undefined, dueDay: account.dueDay ?? undefined,
+      dueMonthOffset: account.dueMonthOffset ?? 1,
       creditLimit: account.creditLimit ?? undefined });
     setEditingAccount(account);
     setShowForm(true);
@@ -157,13 +164,20 @@ export default function AccountsPage() {
               <Field label="Día de cierre (1-31)" error={errors.closingDay?.message}>
                 <input type="number" {...register("closingDay")} className={inputCls} />
               </Field>
-              <Field label="Días hasta vencimiento" error={errors.dueDaysAfterClosing?.message}>
+              <Field label="Día de vencimiento (1-31)" error={errors.dueDay?.message}>
                 <input
                   type="number"
-                  {...register("dueDaysAfterClosing")}
+                  {...register("dueDay")}
                   className={inputCls}
                 />
               </Field>
+              <Field label="Vence en" error={errors.dueMonthOffset?.message}>
+                <select {...register("dueMonthOffset", { valueAsNumber: true })} className={inputCls}>
+                  <option value={0}>El mismo mes del cierre</option>
+                  <option value={1}>El mes siguiente</option>
+                </select>
+              </Field>
+              <p className="sm:col-span-3 text-xs text-slate-400">Se repetirá todos los meses. Si el mes es más corto, se usará su último día. El banco puede mover fechas por feriados; verificá el resumen cuando eso ocurra.</p>
               <Field label="Límite de crédito" error={errors.creditLimit?.message}>
                 <input {...register("creditLimit")} className={inputCls} />
               </Field>
@@ -250,8 +264,13 @@ const AccountCard = ({
         <div className="mt-4 space-y-1 rounded-md bg-slate-950/60 p-3 text-xs text-slate-300">
           {ccQ.data ? (
             <>
+              {ccQ.data.dueDay === null && (
+                <div className="rounded border border-amber-800 bg-amber-950/30 p-2 text-amber-300">
+                  Esta tarjeta usa el cálculo anterior por cantidad de días. Editala una vez para fijar el día de vencimiento de todos los meses.
+                </div>
+              )}
               <div>
-                Cierre actual:{" "}
+                Cierre del resumen a vencer:{" "}
                 <span className="text-slate-100">{fmtDate(ccQ.data.currentCloseDate)}</span>
               </div>
               <div>
@@ -261,6 +280,12 @@ const AccountCard = ({
               <div>
                 Resumen actual:
                 <StatementBreakdown ars={ccQ.data.currentStatement.ars} usd={ccQ.data.currentStatement.usd} />
+              </div>
+              <div>
+                Próximo cierre: <span className="text-slate-100">{fmtDate(ccQ.data.nextCloseDate)}</span>
+              </div>
+              <div>
+                Próximo vencimiento: <span className="text-slate-100">{fmtDate(ccQ.data.nextDueDate)}</span>
               </div>
               <div>
                 Próximo resumen:

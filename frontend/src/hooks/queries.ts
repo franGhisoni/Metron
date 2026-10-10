@@ -187,6 +187,7 @@ export const useCreditCardStatus = (accountId: string | null | undefined) =>
   useQuery({
     enabled: !!accountId,
     queryKey: ["creditCardStatus", accountId],
+    refetchInterval: 5 * 60_000,
     queryFn: async () =>
       (await api.get<CreditCardStatus>(`/api/accounts/${accountId}/credit-card-status`)).data,
   });
@@ -195,6 +196,7 @@ export const useCreditCardStatuses = (accountIds: string[]) =>
   useQueries({
     queries: accountIds.map((accountId) => ({
       queryKey: ["creditCardStatus", accountId],
+      refetchInterval: 5 * 60_000,
       queryFn: async () =>
         (await api.get<CreditCardStatus>(`/api/accounts/${accountId}/credit-card-status`)).data,
       enabled: !!accountId,
@@ -391,6 +393,7 @@ export const useUpdateAccount = () => {
       (await api.put<Account>(`/api/accounts/${id}`, body)).data,
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["accounts"] });
+      void qc.invalidateQueries({ queryKey: ["creditCardStatus"] });
       void qc.invalidateQueries({ queryKey: ["reports"] });
     },
   });

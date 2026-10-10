@@ -15,7 +15,8 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "seed": "tsx prisma/seed.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:credit-card": "pnpm build && node --test tests/creditCard.test.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "^9.3.1",

@@ -18,6 +18,8 @@ export type Account = {
   balance: string;
   closingDay: number | null;
   dueDaysAfterClosing: number | null;
+  dueDay: number | null;
+  dueMonthOffset: number | null;
   creditLimit: string | null;
   createdAt: string;
   updatedAt: string;
@@ -111,8 +113,11 @@ export type CreditCardStatus = {
   currency: Currency;
   creditLimit: string | null;
   closingDay: number;
-  dueDaysAfterClosing: number;
+  dueDaysAfterClosing: number | null;
+  dueDay: number | null;
+  dueMonthOffset: number | null;
   previousCloseDate: string;
+  previousDueDate: string;
   currentCloseDate: string;
   currentDueDate: string;
   nextCloseDate: string;

@@ -1,0 +1,2 @@
+ALTER TABLE "Account" ADD COLUMN "dueDay" INTEGER;
+ALTER TABLE "Account" ADD COLUMN "dueMonthOffset" INTEGER;

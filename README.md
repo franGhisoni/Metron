@@ -104,22 +104,26 @@ entry time, so historical reports are stable even as rates move.
 
 ### Credit card statements
 
-Accounts of type `credit_card` require `closingDay`, `dueDaysAfterClosing`, and
-`creditLimit`. `GET /api/accounts/:id/credit-card-status` returns:
+Accounts of type `credit_card` require `closingDay`, `dueDay`,
+`dueMonthOffset` (0 for the same month or 1 for the following month), and
+`creditLimit`. The configured days repeat each month; days 29–31 are clamped
+to the final day of shorter months. Existing cards using
+`dueDaysAfterClosing` remain readable, but should be edited once to configure
+a fixed due day. `GET /api/accounts/:id/credit-card-status` returns:
 
 - Previous / current / next close dates
 - Current and next due dates
-- Current-statement total and next-statement total (split by transaction date vs.
-  closing day)
+- Current-statement total and next-statement total
 - Utilization (current total ÷ credit limit)
 
-Rule: a purchase on or before the current close falls into the **current** statement;
-after the close, it falls into the **next** statement.
+Rule: a closed statement remains current until its due date. Purchases after
+its close enter the next statement. The dates are recurring calendar rules;
+bank changes for holidays or weekends require updating the card configuration.
 
 ### PWA
 
-The frontend uses `vite-plugin-pwa` with Workbox. API `GET` responses are cached
-`NetworkFirst` for 7 days so the app can show last-known data offline. Drop your icons
+The frontend uses `vite-plugin-pwa` with Workbox. Authenticated API responses
+are not cached offline. Drop your icons
 in `frontend/public/icons/` before shipping (see the README there).
 
 ## Deploying to Railway
