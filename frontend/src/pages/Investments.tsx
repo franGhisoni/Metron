@@ -10,6 +10,7 @@ import {
   useInvestments,
   useRates,
   useUpdateInvestment,
+  useRefreshInvestmentPrices,
 } from "../hooks/queries";
 import { useCurrencyStore } from "../lib/currency";
 import {
@@ -82,6 +83,7 @@ export default function InvestmentsPage() {
   const createInvestment = useCreateInvestment();
   const updateInvestment = useUpdateInvestment();
   const deleteInvestment = useDeleteInvestment();
+  const refreshPrices = useRefreshInvestmentPrices();
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<Investment | null>(null);
 
@@ -176,9 +178,16 @@ export default function InvestmentsPage() {
         <div>
           <h1 className="text-2xl font-semibold">Inversiones</h1>
           <p className="mt-1 text-sm text-slate-400">
-            Seguimiento manual de CEDEARs, cripto, bonos, acciones y fondos.
+            Cartera con cotizaciones de Yahoo Finance y precios manuales.
           </p>
         </div>
+        <button
+          onClick={() => refreshPrices.mutate()}
+          disabled={refreshPrices.isPending || !investmentsQ.data?.length}
+          className="rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+        >
+          {refreshPrices.isPending ? "Actualizando..." : "Actualizar cotizaciones"}
+        </button>
         <button
           onClick={showForm ? closeForm : openCreate}
           className="rounded-md border border-slate-700 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800"
@@ -189,13 +198,27 @@ export default function InvestmentsPage() {
 
       <SummaryCards summary={summaryQ.data} currency={displayCurrency} />
 
+      <div className="space-y-2 text-sm text-slate-400" aria-live="polite">
+        <p>Yahoo Finance: las cotizaciones pueden tener demora. Conversión ARS/USD al dólar blue configurado en Metron.</p>
+        <p>Usá el ticker exacto: AAPL (acción en EE.UU.), GGAL.BA (acción local), BTC-USD (cripto). Para CEDEARs, usá el ticker local con .BA si Yahoo lo cubre. Bonos, FCI y plazos fijos se actualizan manualmente.</p>
+        {refreshPrices.isError && <p role="alert" className="text-red-400">No se pudo actualizar. Intentá nuevamente en un minuto.</p>}
+        {refreshPrices.data && (
+          <div>
+            <p>{refreshPrices.data.results.filter((r) => r.status === "updated").length} posiciones actualizadas.</p>
+            {refreshPrices.data.results.filter((r) => r.status !== "updated").map((r) => (
+              <p key={r.id}>{r.symbol}: {r.message}</p>
+            ))}
+          </div>
+        )}
+      </div>
+
       {showForm && (
         <form
           onSubmit={handleSubmit(onSubmit)}
           className="grid gap-3 rounded-lg border border-slate-800 bg-slate-900 p-4 md:grid-cols-4"
         >
           <Field label="Ticker" error={errors.symbol?.message}>
-            <input {...register("symbol")} className={inputCls} placeholder="YPFD, GGAL, BTC" />
+            <input {...register("symbol")} className={inputCls} placeholder="AAPL, GGAL.BA, BTC-USD" />
           </Field>
           <Field label="Nombre" error={errors.name?.message}>
             <input {...register("name")} className={inputCls} placeholder="YPF, Bitcoin..." />

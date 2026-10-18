@@ -215,6 +215,18 @@ export const useInvestments = () =>
     queryFn: async () => (await api.get<Investment[]>("/api/investments")).data,
   });
 
+export const useRefreshInvestmentPrices = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => (await api.post<{
+      results: Array<{ id: string; symbol: string; status: "updated" | "skipped" | "error"; message: string }>;
+    }>("/api/investments/refresh-prices", undefined, { timeout: 60_000 })).data,
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ["investments"] });
+    },
+  });
+};
+
 export const useInvestmentSummary = () =>
   useQuery({
     queryKey: ["investments", "summary"],

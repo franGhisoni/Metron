@@ -175,6 +175,31 @@ clients remain explicitly controlled.
 
 ## What's next
 
+### Investment quotes (Yahoo Finance)
+
+The Investments page includes **Actualizar cotizaciones**, backed by authenticated
+`POST /api/investments/refresh-prices`. No API key or paid subscription is needed
+for this implementation. It uses Yahoo's unofficial chart endpoint; availability
+and continued free access are not guaranteed. Data may be delayed. Check Yahoo's
+data usage terms before distributing it in a commercial product.
+
+Use the exact Yahoo ticker: `AAPL` for a US stock, `GGAL.BA` for a Buenos Aires
+stock, `BTC-USD` for crypto. CEDEARs require their local `.BA` ticker and an ARS
+quote; the US underlying price is never substituted. Unsupported symbols, bonds
+(which may quote per 100 nominal units), FCI, fixed deposits and other assets
+retain manual prices. Coverage depends on Yahoo.
+
+Quotes are cached in Redis for 15 minutes, have an 8-second request timeout, and
+are rejected if invalid, in an unsupported currency, or older than seven days.
+Refresh accepts at most two requests per minute per client. Conversion uses
+Metron's current stored/cached blue rate, which can itself be dated; purchase
+prices and purchase exchange rates remain unchanged. The displayed price date
+is Yahoo's market timestamp. Newer saved valuations and concurrent edits are
+preserved, and the page reports skipped/failed positions individually.
+
+Validation: `cd backend`, `pnpm build`, then
+`node --test tests/investmentQuotes.test.mjs`. Frontend: `cd frontend`, `pnpm build`.
+
 Phase 3 - projections and planning: savings goals / wishlist, installment-vs-cash
 simulator, spending projections, and financial health score. Then investments, then AI insights.
 
